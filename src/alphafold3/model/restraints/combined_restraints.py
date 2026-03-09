@@ -457,6 +457,7 @@ class CombinedRestraints:
         """GPU minimization via jax.scipy.optimize.minimize (BFGS)."""
         import jax
         import jax.numpy as jnp
+        import jax.scipy.optimize  # noqa: F401  explicit import required for JAX lazy loader
 
         x0 = jnp.array(active_pos.reshape(-1), dtype=jnp.float32)
         result = jax.scipy.optimize.minimize(
