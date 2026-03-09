@@ -376,6 +376,12 @@ _COMPRESS_LARGE_OUTPUT_FILES = flags.DEFINE_bool(
     ' largest files) using zstandard. Note that embeddings and distogram, if'
     ' saved, are already stored in a compressed format.',
 )
+_RESTRAINT_CONFIG = flags.DEFINE_string(
+    'restraint_config',
+    None,
+    'Path to a YAML file specifying restraints (conformer and/or distance). '
+    'If set, restraint-guided inference will be performed.',
+)
 
 
 def make_model_config(
@@ -452,6 +458,50 @@ class ModelRunner:
     result['__identifier__'] = identifier
     return result
 
+  def run_inference_with_restraints(
+      self,
+      featurised_example: features.BatchDict,
+      rng_key: jnp.ndarray,
+      restraint_callback,
+  ) -> model.ModelResult:
+    """Computes a forward pass with restraint-guided diffusion sampling.
+
+    Args:
+      featurised_example: featurised input batch.
+      rng_key: JAX random key.
+      restraint_callback: callable (positions, t_hat) -> positions, created
+        via CombinedRestraints.make_restraint_callback().
+
+    Returns:
+      Model result dict with restraint-minimized diffusion samples.
+    """
+    featurised_example = jax.device_put(
+        jax.tree_util.tree_map(
+            jnp.asarray, utils.remove_invalidly_typed_feats(featurised_example)
+        ),
+        self._device,
+    )
+
+    @hk.transform
+    def forward_fn_with_restraints(batch):
+      return model.Model(self._model_config)(batch, restraint_callback=restraint_callback)
+
+    _model_with_restraints = functools.partial(
+        jax.jit(forward_fn_with_restraints.apply, device=self._device),
+        self.model_params,
+    )
+
+    result = _model_with_restraints(rng_key, featurised_example)
+    result = jax.tree.map(np.asarray, result)
+    result = jax.tree.map(
+        lambda x: x.astype(jnp.float32) if x.dtype == jnp.bfloat16 else x,
+        result,
+    )
+    result = dict(result)
+    identifier = self.model_params['__meta__']['__identifier__'].tobytes()
+    result['__identifier__'] = identifier
+    return result
+
   def extract_inference_results(
       self,
       batch: features.BatchDict,
@@ -517,6 +567,7 @@ def predict_structure(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    restraints_config: dict | None = None,
 ) -> Sequence[ResultsForSeed]:
   """Runs the full inference pipeline to predict structures for each seed."""
 
@@ -536,6 +587,29 @@ def predict_structure(
       f'Featurising data with {len(fold_input.rng_seeds)} seed(s) took'
       f' {time.time() - featurisation_start_time:.2f} seconds.'
   )
+
+  # Set up restraints if config is provided
+  restraint_callback = None
+  if restraints_config is not None:
+    from alphafold3.model.restraints.restraint_setup import setup_restraints
+    from alphafold3.model import feat_batch as feat_batch_mod
+    # Use the first featurised example to get atom layout info
+    if featurised_examples:
+      first_example = featurised_examples[0]
+      batch = feat_batch_mod.Batch.from_data_dict(first_example)
+      all_token_atoms_layout = batch.convert_model_output.token_atoms_layout
+      max_atoms_per_token = all_token_atoms_layout.shape[1]
+      combined = setup_restraints(
+          fold_input=fold_input,
+          all_token_atoms_layout=all_token_atoms_layout,
+          max_atoms_per_token=max_atoms_per_token,
+          ccd=ccd,
+          restraints_config=restraints_config,
+      )
+      if combined is not None:
+        restraint_callback = combined.make_restraint_callback()
+        print('[Restraints] Restraint callback set up successfully.')
+
   print(
       'Running model inference and extracting output structure samples with'
       f' {len(fold_input.rng_seeds)} seed(s)...'
@@ -546,7 +620,12 @@ def predict_structure(
     print(f'Running model inference with seed {seed}...')
     inference_start_time = time.time()
     rng_key = jax.random.PRNGKey(seed)
-    result = model_runner.run_inference(example, rng_key)
+    if restraint_callback is not None:
+      result = model_runner.run_inference_with_restraints(
+          example, rng_key, restraint_callback
+      )
+    else:
+      result = model_runner.run_inference(example, rng_key)
     print(
         f'Running model inference with seed {seed} took'
         f' {time.time() - inference_start_time:.2f} seconds.'
@@ -700,6 +779,7 @@ def process_fold_input(
     resolve_msa_overlaps: bool = True,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
+    restraints_config: dict | None = None,
 ) -> folding_input.Input:
   ...
 
@@ -717,6 +797,7 @@ def process_fold_input(
     resolve_msa_overlaps: bool = True,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
+    restraints_config: dict | None = None,
 ) -> Sequence[ResultsForSeed]:
   ...
 
@@ -733,6 +814,7 @@ def process_fold_input(
     resolve_msa_overlaps: bool = True,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
+    restraints_config: dict | None = None,
 ) -> folding_input.Input | Sequence[ResultsForSeed]:
   """Runs data pipeline and/or inference on a single fold input.
 
@@ -815,6 +897,7 @@ def process_fold_input(
         ref_max_modified_date=ref_max_modified_date,
         conformer_max_iterations=conformer_max_iterations,
         resolve_msa_overlaps=resolve_msa_overlaps,
+        restraints_config=restraints_config,
     )
     print(f'Writing outputs with {len(fold_input.rng_seeds)} seed(s)...')
     write_outputs(
@@ -971,6 +1054,14 @@ def main(_):
   else:
     model_runner = None
 
+  # Load restraints config from YAML file if specified
+  restraints_config = None
+  if _RESTRAINT_CONFIG.value is not None:
+    import yaml
+    with open(_RESTRAINT_CONFIG.value, 'rt') as f:
+      restraints_config = yaml.safe_load(f)
+    print(f'[Restraints] Loaded restraints config from {_RESTRAINT_CONFIG.value}')
+
   num_fold_inputs = 0
   for fold_input in fold_inputs:
     if _NUM_SEEDS.value is not None:
@@ -987,6 +1078,7 @@ def main(_):
         resolve_msa_overlaps=_RESOLVE_MSA_OVERLAPS.value,
         force_output_dir=_FORCE_OUTPUT_DIR.value,
         compress_large_output_files=_COMPRESS_LARGE_OUTPUT_FILES.value,
+        restraints_config=restraints_config,
     )
     num_fold_inputs += 1
 

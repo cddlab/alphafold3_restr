@@ -299,6 +299,7 @@ def sample(
     batch: feat_batch.Batch,
     key: jnp.ndarray,
     config: SampleConfig,
+    restraint_callback=None,
 ) -> dict[str, jnp.ndarray]:
   """Sample using denoiser on batch.
 
@@ -308,6 +309,9 @@ def sample(
     key: random key
     config: config for the sampling process (e.g. number of denoising steps,
       etc.)
+    restraint_callback: optional callable (positions, t_hat) -> positions,
+      called via jax.pure_callback after each denoising step. positions
+      has shape (num_tokens, max_atoms_per_token, 3).
 
   Returns:
     a dict
@@ -337,6 +341,17 @@ def sample(
     positions_noisy = positions + noise
 
     positions_denoised = denoising_step(positions_noisy, t_hat)
+
+    # Apply restraint minimization if callback is provided
+    if restraint_callback is not None:
+      positions_denoised = jax.pure_callback(
+          restraint_callback,
+          jax.ShapeDtypeStruct(positions_denoised.shape, positions_denoised.dtype),
+          positions_denoised,
+          t_hat,
+          vmap_method='sequential',
+      )
+
     grad = (positions_noisy - positions_denoised) / t_hat
 
     d_t = noise_level - t_hat
