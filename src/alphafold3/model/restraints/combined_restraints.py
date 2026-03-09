@@ -430,7 +430,8 @@ class CombinedRestraints:
         N_flat = original_shape[0] * max_atoms
 
         # Flatten to (N_flat, 3) then slice active atoms
-        pos_flat = positions.reshape(N_flat, 3)
+        # Convert to numpy to ensure mutability (positions may be a JAX DeviceArray)
+        pos_flat = np.array(positions.reshape(N_flat, 3))
         active_sites_arr = np.array(self.active_sites)
         active_pos = pos_flat[active_sites_arr]  # (N_active, 3)
 
