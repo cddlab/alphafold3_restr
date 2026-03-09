@@ -342,13 +342,17 @@ def sample(
 
     positions_denoised = denoising_step(positions_noisy, t_hat)
 
-    # Apply restraint minimization if callback is provided
+    # Apply restraint minimization if callback is provided.
+    # Pass noise_level_prev (actual current sigma) rather than t_hat so that
+    # CombinedRestraints.start_sigma is compared against the true noise level.
+    # t_hat = noise_level_prev * (1 + gamma) is inflated by up to 1.8x when
+    # gamma = gamma_0 = 0.8, causing restraints to kick in far too late.
     if restraint_callback is not None:
       positions_denoised = jax.pure_callback(
           restraint_callback,
           jax.ShapeDtypeStruct(positions_denoised.shape, positions_denoised.dtype),
           positions_denoised,
-          t_hat,
+          noise_level_prev,
           vmap_method='sequential',
       )
 

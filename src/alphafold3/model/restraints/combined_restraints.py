@@ -452,24 +452,66 @@ class CombinedRestraints:
             method=self.method,
             options={"maxiter": self.max_iter},
         )
+        if self.verbose:
+            crds = opt.x.reshape(self.natoms, 3)
+            for d in self.distance_data:
+                if d.is_valid():
+                    d.print(crds)
         return opt.x.reshape(self.natoms, 3)
 
     def _minimize_jax(self, active_pos: np.ndarray) -> np.ndarray:
-        """GPU minimization via jax.scipy.optimize.minimize (BFGS)."""
+        """GPU minimization via jax.scipy.optimize.minimize (BFGS).
+
+        Runs in float64 to avoid NaN accumulation in the BFGS Hessian inverse
+        approximation.  JAX disables float64 by default (x64 mode off), so we
+        enable it only for this call via jax.experimental.enable_x64().
+
+        Safe norms in jax_energy prevent NaN gradients at zero-length vectors.
+        """
         import jax
         import jax.numpy as jnp
         import jax.scipy.optimize  # noqa: F401  explicit import required for JAX lazy loader
 
-        x0 = jnp.array(active_pos.reshape(-1), dtype=jnp.float32)
-        result = jax.scipy.optimize.minimize(
-            self._jax_total_energy,
-            x0,
-            method='BFGS',
-            options={'maxiter': self.max_iter, 'gtol': 1e-4},
-        )
+        def _run_bfgs():
+            # float64 for numerical stability in BFGS Hessian approximation
+            x0 = jnp.array(active_pos.reshape(-1), dtype=jnp.float64)
+
+            def energy_f64(x):
+                # Cast positions to float32 for jax_energy kernels, return float64
+                return self._jax_total_energy(x.astype(jnp.float32)).astype(jnp.float64)
+
+            return jax.scipy.optimize.minimize(
+                energy_f64,
+                x0,
+                method='BFGS',
+                options={'maxiter': self.max_iter, 'gtol': 1e-5},
+            )
+
+        try:
+            with jax.experimental.enable_x64():
+                result = _run_bfgs()
+        except Exception:
+            # Fallback: run without x64 if the context manager is unavailable
+            result = jax.scipy.optimize.minimize(
+                self._jax_total_energy,
+                jnp.array(active_pos.reshape(-1), dtype=jnp.float32),
+                method='BFGS',
+                options={'maxiter': self.max_iter, 'gtol': 1e-5},
+            )
+
         if self.verbose:
-            print(f"[Restraints JAX BFGS] success={result.success}, fun={float(result.fun):.4f}")
-        return np.array(result.x.reshape(self.natoms, 3), dtype=np.float32)
+            fun_val = float(result.fun)
+            status = "success" if result.success else f"failed (nit={result.nit})"
+            if not np.isnan(fun_val):
+                print(f"[Restraints JAX BFGS] {status}, fun={fun_val:.4f}")
+            else:
+                print(f"[Restraints JAX BFGS] {status}, fun=NaN (returning unmodified positions)")
+
+        opt_x = np.array(result.x, dtype=np.float32)
+        # Return unmodified positions if optimization produced NaN
+        if np.any(np.isnan(opt_x)):
+            return active_pos
+        return opt_x.reshape(self.natoms, 3)
 
     # ------------------------------------------------------------------
     # make_restraint_callback - for use with jax.pure_callback

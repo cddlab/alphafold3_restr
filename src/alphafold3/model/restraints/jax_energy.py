@@ -7,6 +7,16 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 
+def _safe_norm(v: jnp.ndarray, axis: int = -1, eps: float = 1e-12) -> jnp.ndarray:
+    """Numerically safe vector norm.
+
+    jnp.linalg.norm(v) at v=0 produces NaN gradients via autodiff because
+    d/dv ||v|| = v/||v|| is undefined at v=0.  Using sqrt(sum(v^2) + eps^2)
+    keeps the gradient finite everywhere.
+    """
+    return jnp.sqrt(jnp.sum(v ** 2, axis=axis) + eps ** 2)
+
+
 def jax_bond_energy(
     positions: jnp.ndarray,
     aid0_arr: jnp.ndarray,
@@ -17,7 +27,7 @@ def jax_bond_energy(
 ) -> jnp.ndarray:
     """Flat-bottomed bond energy. positions: (N, 3), aids: (B,)"""
     v = positions[aid0_arr] - positions[aid1_arr]  # (B, 3)
-    d = jnp.linalg.norm(v, axis=-1)  # (B,)
+    d = _safe_norm(v, axis=-1)  # (B,)
     r1 = r0_arr - slack_arr
     r2 = r0_arr + slack_arr
     below = jnp.where(d < r1, w_arr * (d - r1) ** 2, 0.0)
@@ -37,8 +47,9 @@ def jax_angle_energy(
     """Flat-bottomed angle energy. positions: (N, 3), aids: (B,)"""
     v_ij = positions[aid0_arr] - positions[aid1_arr]  # (B, 3)
     v_kj = positions[aid2_arr] - positions[aid1_arr]  # (B, 3)
-    norm_ij = jnp.linalg.norm(v_ij, axis=-1, keepdims=True) + 1e-8
-    norm_kj = jnp.linalg.norm(v_kj, axis=-1, keepdims=True) + 1e-8
+    # _safe_norm avoids NaN gradients at v=0; adding eps to the result does not
+    norm_ij = _safe_norm(v_ij, axis=-1, eps=1e-8)[..., None]
+    norm_kj = _safe_norm(v_kj, axis=-1, eps=1e-8)[..., None]
     cos_th = jnp.sum(v_ij / norm_ij * v_kj / norm_kj, axis=-1)
     cos_th = jnp.clip(cos_th, -1.0 + 1e-7, 1.0 - 1e-7)
     theta = jnp.arccos(cos_th)  # (B,)
@@ -86,7 +97,8 @@ def jax_distance_energy(
     """COM distance energy for one DistanceData entry. positions: (N, 3)"""
     com1 = jnp.mean(positions[sites1_arr], axis=0)
     com2 = jnp.mean(positions[sites2_arr], axis=0)
-    dist = jnp.linalg.norm(com2 - com1)
+    # Use safe norm to avoid NaN gradients when COMs coincide
+    dist = _safe_norm(com2 - com1, axis=-1)
     zero = jnp.zeros(())
     rtype = distance_restraint_type
     if rtype == "harmonic":
