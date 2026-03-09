@@ -376,13 +376,6 @@ _COMPRESS_LARGE_OUTPUT_FILES = flags.DEFINE_bool(
     ' largest files) using zstandard. Note that embeddings and distogram, if'
     ' saved, are already stored in a compressed format.',
 )
-_RESTRAINT_CONFIG = flags.DEFINE_string(
-    'restraint_config',
-    None,
-    'Path to a YAML file specifying restraints (conformer and/or distance). '
-    'If set, restraint-guided inference will be performed.',
-)
-
 
 def make_model_config(
     *,
@@ -567,7 +560,6 @@ def predict_structure(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
-    restraints_config: dict | None = None,
 ) -> Sequence[ResultsForSeed]:
   """Runs the full inference pipeline to predict structures for each seed."""
 
@@ -588,9 +580,9 @@ def predict_structure(
       f' {time.time() - featurisation_start_time:.2f} seconds.'
   )
 
-  # Set up restraints if config is provided
+  # Set up restraints if config is embedded in the fold input JSON
   restraint_callback = None
-  if restraints_config is not None:
+  if fold_input.restraints_config is not None:
     from alphafold3.model.restraints.restraint_setup import setup_restraints
     from alphafold3.model import feat_batch as feat_batch_mod
     # Use the first featurised example to get atom layout info
@@ -604,7 +596,7 @@ def predict_structure(
           all_token_atoms_layout=all_token_atoms_layout,
           max_atoms_per_token=max_atoms_per_token,
           ccd=ccd,
-          restraints_config=restraints_config,
+          restraints_config=fold_input.restraints_config,
       )
       if combined is not None:
         restraint_callback = combined.make_restraint_callback()
@@ -779,7 +771,6 @@ def process_fold_input(
     resolve_msa_overlaps: bool = True,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
-    restraints_config: dict | None = None,
 ) -> folding_input.Input:
   ...
 
@@ -797,7 +788,6 @@ def process_fold_input(
     resolve_msa_overlaps: bool = True,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
-    restraints_config: dict | None = None,
 ) -> Sequence[ResultsForSeed]:
   ...
 
@@ -814,7 +804,6 @@ def process_fold_input(
     resolve_msa_overlaps: bool = True,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
-    restraints_config: dict | None = None,
 ) -> folding_input.Input | Sequence[ResultsForSeed]:
   """Runs data pipeline and/or inference on a single fold input.
 
@@ -897,7 +886,6 @@ def process_fold_input(
         ref_max_modified_date=ref_max_modified_date,
         conformer_max_iterations=conformer_max_iterations,
         resolve_msa_overlaps=resolve_msa_overlaps,
-        restraints_config=restraints_config,
     )
     print(f'Writing outputs with {len(fold_input.rng_seeds)} seed(s)...')
     write_outputs(
@@ -1054,14 +1042,6 @@ def main(_):
   else:
     model_runner = None
 
-  # Load restraints config from YAML file if specified
-  restraints_config = None
-  if _RESTRAINT_CONFIG.value is not None:
-    import yaml
-    with open(_RESTRAINT_CONFIG.value, 'rt') as f:
-      restraints_config = yaml.safe_load(f)
-    print(f'[Restraints] Loaded restraints config from {_RESTRAINT_CONFIG.value}')
-
   num_fold_inputs = 0
   for fold_input in fold_inputs:
     if _NUM_SEEDS.value is not None:
@@ -1078,7 +1058,6 @@ def main(_):
         resolve_msa_overlaps=_RESOLVE_MSA_OVERLAPS.value,
         force_output_dir=_FORCE_OUTPUT_DIR.value,
         compress_large_output_files=_COMPRESS_LARGE_OUTPUT_FILES.value,
-        restraints_config=restraints_config,
     )
     num_fold_inputs += 1
 

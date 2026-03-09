@@ -1,0 +1,42 @@
+{
+  "dialect": "alphafold3",
+  "version": 4,
+  "name": "restraint_example",
+  "modelSeeds": [42],
+  "sequences": [
+    {
+      "protein": {
+        "id": "A",
+        "sequence": "MHHHHHHKIEEGKLVIWINGDKGYNGLAEVGKKFEKDTG"
+      }
+    },
+    {
+      "ligand": {
+        "id": "B",
+        "smiles": "CC(=O)Oc1ccccc1C(=O)O",
+        "description": "Aspirin (acetylsalicylic acid)",
+        "conformer_restraint": true
+      }
+    }
+  ],
+  "restraints_config": {
+    "verbose": true,
+    "max_iter": 500,
+    "start_sigma": 2.0,
+    "gpu": false,
+
+    "conformer_restraints_config": {
+      "bond":   {"slack": 0.1,    "weight": 1.0},
+      "angle":  {"slack": 0.0873, "weight": 1.0},
+      "chiral": {"slack": 0.05,   "weight": 1.0, "f_max": -100.0}
+    },
+
+    "distance_restraints_config": [
+      {
+        "atom_selection1": "chain A and resid 5 to 20",
+        "atom_selection2": "chain B",
+        "flat-bottomed2": {"target_distance2": 15.0}
+      }
+    ]
+  }
+}

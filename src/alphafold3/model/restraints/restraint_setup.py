@@ -39,13 +39,6 @@ def setup_restraints(
     combined.set_config(restraints_config)
 
     # ---- Conformer restraints ----
-    # chains with conformer_restraints enabled
-    conformer_enabled_chains = set(
-        restraints_config.get("conformer_restraints_chains", [])
-    )
-    # If not specified, apply to ALL ligands
-    apply_to_all_ligands = len(conformer_enabled_chains) == 0
-
     # Build atom name -> flat global index mapping for ALL atoms
     num_tokens = all_token_atoms_layout.shape[0]
     # (chain_id, atom_name_in_residue, token_idx) uniqueness assumption:
@@ -64,9 +57,10 @@ def setup_restraints(
     for chain in fold_input.chains:
         if not isinstance(chain, folding_input.Ligand):
             continue
-        chain_id = chain.id
-        if not apply_to_all_ligands and chain_id not in conformer_enabled_chains:
+        # Apply conformer restraints only to ligands with conformer_restraint=True
+        if not chain.conformer_restraint:
             continue
+        chain_id = chain.id
 
         # Get RDKit mol for this ligand
         mol = _get_rdkit_mol(chain, ccd)
