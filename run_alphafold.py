@@ -41,6 +41,7 @@ from alphafold3.constants import chemical_components
 import alphafold3.cpp
 from alphafold3.data import featurisation
 from alphafold3.data import pipeline
+from alphafold3.data.tools import rdkit_utils
 from alphafold3.data.tools import shards
 from alphafold3.model import features
 from alphafold3.model import model
@@ -552,13 +553,53 @@ def build_restraints(
   except ImportError:
     Chem = None
 
+  def _decode_atom_name_chars(chars: np.ndarray) -> str:
+    decoded = ''.join(chr(int(x) + 32) for x in chars if int(x) != 0)
+    return decoded.strip()
+
+  def _build_ligand_flat_indices_by_name(
+      chain_id: str,
+      atom_names: Sequence[str],
+  ) -> np.ndarray:
+    if chain_id not in chain_id_to_asym_int:
+      raise ValueError(
+          f'Chain ID "{chain_id}" not found in mapping: {chain_id_to_asym_int}'
+      )
+    asym_int = chain_id_to_asym_int[chain_id]
+    token_indices = np.where(token_asym_ids == asym_int)[0]
+    atom_name_to_flat_idx = {}
+    for token_idx in token_indices:
+      for within_token_idx in range(max_atoms_per_token):
+        if not bool(ref_mask[token_idx, within_token_idx]):
+          continue
+        atom_name = _decode_atom_name_chars(
+            ref_atom_name_chars[token_idx, within_token_idx]
+        )
+        if atom_name:
+          atom_name_to_flat_idx.setdefault(
+              atom_name,
+              int(token_idx) * max_atoms_per_token + within_token_idx,
+          )
+
+    missing = [name for name in atom_names if name not in atom_name_to_flat_idx]
+    if missing:
+      raise ValueError(
+          f'Failed to map ligand atoms for chain {chain_id}. Missing atom names:'
+          f' {missing}'
+      )
+    return np.array(
+        [atom_name_to_flat_idx[name] for name in atom_names], dtype=np.int32
+    )
+
   restraint_cfg = fold_input.restraints_config
   config = RestraintConfig.from_dict(restraint_cfg)
 
   token_asym_ids = np.array(example['asym_id'])  # (num_tokens,)
   ref_mask = np.array(example['ref_mask'])       # (num_tokens, max_per)
   ref_pos = np.array(example['ref_pos'])         # (num_tokens, max_per, 3)
+  ref_atom_name_chars = np.array(example['ref_atom_name_chars'])
   max_atoms_per_token = ref_pos.shape[1]
+  ccd = chemical_components.Ccd(user_ccd=fold_input.user_ccd)
 
   # Build chain_id → asym_id mapping from fold_input chain order.
   # Asym IDs are assigned 1, 2, 3, ... in order of unique chains.
@@ -585,20 +626,35 @@ def build_restraints(
       # Skip ligands that opt out of conformer restraints.
       if not chain.conformer_restraints:
         continue
-      if chain.smiles is None:
-        # CCD-based ligands: conformer restraints not yet supported.
-        continue
-      mol = Chem.MolFromSmiles(chain.smiles)
-      if mol is None:
+      if chain.smiles is not None:
+        mol = Chem.MolFromSmiles(chain.smiles)
+        if mol is None:
+          continue
+        flat_indices = build_ligand_flat_indices(
+            chain_id=chain.id,
+            token_asym_ids=token_asym_ids,
+            chain_id_to_asym_int=chain_id_to_asym_int,
+            max_atoms_per_token=max_atoms_per_token,
+        )
+      elif chain.ccd_ids is not None and len(chain.ccd_ids) == 1:
+        ccd_cif = ccd.get(chain.ccd_ids[0])
+        if ccd_cif is None:
+          continue
+        try:
+          mol = rdkit_utils.mol_from_ccd_cif(
+              ccd_cif,
+              sort_alphabetically=False,
+              remove_hydrogens=True,
+          )
+        except rdkit_utils.MolFromMmcifError:
+          continue
+        flat_indices = _build_ligand_flat_indices_by_name(
+            chain.id,
+            [atom.GetProp('atom_name').strip() for atom in mol.GetAtoms()],
+        )
+      else:
         continue
 
-      # Get flat indices for this ligand chain.
-      flat_indices = build_ligand_flat_indices(
-          chain_id=chain.id,
-          token_asym_ids=token_asym_ids,
-          chain_id_to_asym_int=chain_id_to_asym_int,
-          max_atoms_per_token=max_atoms_per_token,
-      )
       if len(flat_indices) == 0:
         continue
 
