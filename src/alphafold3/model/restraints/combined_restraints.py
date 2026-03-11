@@ -423,40 +423,38 @@ class CombinedRestraints:
       )
 
     if self.config.use_gpu:
-      active_sites_jax = jnp.array(self.active_sites, dtype=jnp.int32)
       n_active = self.n_active
 
-      def do_minimize(pos):
-        pos_flat = pos.reshape(-1, 3)
-        active_pos = pos_flat[active_sites_jax]
-        x0 = active_pos.reshape(-1)
-
+      def _gpu_callback(pos):
+        pos_np = np.asarray(pos)
+        pos_flat = pos_np.reshape(-1, 3)
+        active_pos = pos_flat[self.active_sites]
+        x0 = jnp.asarray(active_pos.reshape(-1))
         energy_fn = functools.partial(
             jax_energy.total_energy,
             n_active=n_active,
             conformer_data=self._jax_conformer,
             distance_data=self._jax_distance,
         )
+        x_opt = jax_energy.minimize_cg(x0, energy_fn, self.config.max_iter)
+        x_opt_np = np.asarray(x_opt).reshape(n_active, 3)
+        if not np.all(np.isfinite(x_opt_np)):
+          return self.minimize_cpu(pos_np).astype(pos_np.dtype, copy=False)
+        pos_flat_new = pos_flat.copy()
+        pos_flat_new[self.active_sites] = x_opt_np.astype(pos_flat.dtype, copy=False)
+        pos_out = pos_flat_new.reshape(pos_np.shape)
+        max_abs_coord = np.max(np.abs(pos_out))
+        max_abs_delta = np.max(np.abs(pos_out - pos_np))
+        if not np.all(np.isfinite(pos_out)) or max_abs_coord >= 1e4 or max_abs_delta >= 1e3:
+          return self.minimize_cpu(pos_np).astype(pos_np.dtype, copy=False)
+        return pos_out.astype(pos_np.dtype, copy=False)
 
-        x_opt = jax_energy.minimize_cg(
-            x0, energy_fn, self.config.max_iter
-        )
-        optimized_active = x_opt.reshape(n_active, 3)
-        pos_flat_new = self._scatter_active_positions_jax(pos_flat, optimized_active)
-        pos_out = pos_flat_new.reshape(pos.shape)
-
-        max_abs_coord = jnp.max(jnp.abs(pos_out))
-        max_abs_delta = jnp.max(jnp.abs(pos_out - pos))
-        is_valid = (
-            jnp.all(jnp.isfinite(pos_out))
-            & (max_abs_coord < 1e4)
-            & (max_abs_delta < 1e3)
-        )
-        return jax.lax.cond(
-            is_valid,
-            lambda _: pos_out,
-            _cpu_fallback,
+      def do_minimize(pos):
+        return jax.pure_callback(
+            _gpu_callback,
+            out_spec,
             pos,
+            vmap_method='sequential',
         )
     else:
       def do_minimize(pos):
