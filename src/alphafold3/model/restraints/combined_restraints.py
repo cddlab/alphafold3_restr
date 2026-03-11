@@ -5,29 +5,19 @@
 
 """CombinedRestraints: manages conformer and distance restraints during diffusion.
 
-GPU mode (use_gpu=True):
-  - JAX gradient descent via jax.lax.fori_loop, called inside apply_denoising_step.
-  - Compatible with hk.vmap + hk.scan.
-
-CPU mode (use_gpu=False):
-  - scipy CG minimization applied once after the full diffusion loop.
-  - Called from predict_structure() in run_alphafold.py.
+Restraints are applied after each denoising step via a JAX minimizer,
+compatible with hk.vmap + hk.scan and aligned with Protenix's step-wise flow.
 
 Coordinate layout (AF3):
   positions: (num_tokens, max_atoms_per_token, 3) per sample inside the scan.
   flat_idx = token_idx * max_atoms_per_token + within_token_idx
   For ligands: within_token_idx = 0 always.
 
-Usage (GPU mode):
+Usage:
   # Build at inference time, after featurisation:
   restraints = CombinedRestraints.from_config(restraint_config, fold_input, batch)
   # Pass to model for injection inside diffusion loop
   model_output = model(batch, restraints=restraints)
-
-Usage (CPU mode):
-  # Same build step, then apply post-diffusion:
-  samples = model(batch)
-  samples = restraints.apply_cpu_postprocess(samples)
 """
 from __future__ import annotations
 
@@ -53,19 +43,18 @@ class RestraintConfig:
   """Top-level restraint configuration.
 
   Attributes:
-    use_gpu: If True, apply JAX gradient descent inside the diffusion loop.
-      If False, apply scipy CG after the full diffusion loop.
+    use_gpu: Legacy compatibility flag retained in the input schema.
     start_sigma: Only apply restraints when noise level <= start_sigma.
-    max_iter: Number of gradient descent steps (GPU) or CG iterations (CPU).
-    learning_rate: Step size for gradient descent (GPU mode only).
-    method: Scipy optimizer method (CPU mode only).
+    max_iter: Number of gradient descent steps.
+    learning_rate: Step size for gradient descent.
+    method: Legacy compatibility field.
     verbose: Print statistics.
     conformer_restraints_config: Sub-config for conformer restraints.
       Keys: 'enabled' (bool), 'bond' (dict), 'angle' (dict), 'chiral' (dict).
     distance_restraints_config: List of distance restraint specs.
       Each spec: 'atom_selection1', 'atom_selection2', 'harmonic'/'flat-bottomed'/etc.
   """
-  use_gpu: bool = True
+  use_gpu: bool = False
   start_sigma: float = 1.0
   max_iter: int = 100
   learning_rate: float = 0.01
@@ -91,7 +80,7 @@ class RestraintConfig:
       }
     """
     return cls(
-        use_gpu=d.get('gpu', True),
+        use_gpu=d.get('gpu', False),
         start_sigma=float(d.get('start_sigma', 1.0)),
         max_iter=int(d.get('max_iter', 100)),
         learning_rate=float(d.get('learning_rate', 0.01)),
@@ -159,12 +148,7 @@ class DistanceRestraintData:
 # ---------------------------------------------------------------------------
 
 class CombinedRestraints:
-  """Manages conformer and distance restraints for guided diffusion.
-
-  Instantiate via from_config() after featurisation. Then:
-  - GPU mode: pass to sample() for in-loop gradient descent.
-  - CPU mode: call apply_cpu_postprocess() after sample() returns.
-  """
+  """Manages conformer and distance restraints for guided diffusion."""
 
   def __init__(
       self,
@@ -186,20 +170,11 @@ class CombinedRestraints:
         int(g): l for l, g in enumerate(active_sites)
     }
     self.n_active = len(active_sites)
-    self._distance_anchor_globals = np.array(
-        sorted({
-            int(g)
-            for dr in distance_restraints
-            for g in (*dr.global_sites1, *dr.global_sites2)
-        }),
-        dtype=np.int32,
-    )
-
-    # JAX arrays for GPU mode (set in _build_jax_arrays)
+    # JAX arrays used by the in-scan minimizer.
     self._jax_conformer: dict | None = None
     self._jax_distance: dict | None = None
 
-    if config.use_gpu and self.n_active > 0:
+    if self.n_active > 0:
       self._build_jax_arrays()
 
   # ------------------------------------------------------------------
@@ -282,21 +257,10 @@ class CombinedRestraints:
   ) -> np.ndarray:
     """Scatter optimized active coordinates back to the full flat layout.
 
-    Distance restraints are resolved on one anchor atom per token for polymers.
-    To avoid tearing the polymer apart, the anchor displacement is propagated as
-    a rigid translation to every atom within the same token.
+    Protenix applies restraints directly to the selected active atoms.
     """
     pos_flat_new = pos_flat.copy()
     pos_flat_new[self.active_sites] = optimized_active.astype(pos_flat.dtype)
-
-    for global_idx in self._distance_anchor_globals:
-      token_idx = int(global_idx) // self.max_atoms_per_token
-      start = token_idx * self.max_atoms_per_token
-      end = start + self.max_atoms_per_token
-      local_idx = self._global_to_local[int(global_idx)]
-      delta = optimized_active[local_idx] - pos_flat[int(global_idx)]
-      pos_flat_new[start:end] = (pos_flat[start:end] + delta).astype(pos_flat.dtype)
-
     return pos_flat_new
 
   def _scatter_active_positions_jax(
@@ -308,15 +272,6 @@ class CombinedRestraints:
     pos_flat_new = pos_flat.at[jnp.array(self.active_sites, dtype=jnp.int32)].set(
         optimized_active
     )
-
-    for global_idx in self._distance_anchor_globals.tolist():
-      token_idx = int(global_idx) // self.max_atoms_per_token
-      start = token_idx * self.max_atoms_per_token
-      end = start + self.max_atoms_per_token
-      local_idx = self._global_to_local[int(global_idx)]
-      delta = optimized_active[local_idx] - pos_flat[int(global_idx)]
-      pos_flat_new = pos_flat_new.at[start:end].set(pos_flat[start:end] + delta)
-
     return pos_flat_new
 
   def _flat_pair_to_local(self, flat_i: np.ndarray, flat_j: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -342,7 +297,7 @@ class CombinedRestraints:
     return lc, l1, l2, l3
 
   # ------------------------------------------------------------------
-  # JAX array construction (GPU mode)
+  # JAX array construction
   # ------------------------------------------------------------------
 
   def _build_jax_arrays(self) -> None:
@@ -440,7 +395,7 @@ class CombinedRestraints:
       self._jax_distance = None
 
   # ------------------------------------------------------------------
-  # GPU mode: called inside apply_denoising_step
+  # In-scan minimization
   # ------------------------------------------------------------------
 
   def minimize_gpu(
@@ -577,7 +532,7 @@ class CombinedRestraints:
         delta = d - dr.target2
       else:
         delta = 0.0
-      ene += dr.weight * delta ** 2
+      ene += delta ** 2
 
     return ene
 
@@ -664,7 +619,7 @@ class CombinedRestraints:
   def resolve_distance_restraints(
       distance_configs: list[dict],
       token_asym_ids: np.ndarray,
-      token_res_ids: np.ndarray,
+      ref_mask: np.ndarray,
       chain_id_to_asym_int: dict[str, int],
       max_atoms_per_token: int,
   ) -> list[DistanceRestraintData]:
@@ -673,7 +628,6 @@ class CombinedRestraints:
     Args:
       distance_configs: list of distance restraint spec dicts.
       token_asym_ids: (num_tokens,) int array, asym_id per token.
-      token_res_ids: (num_tokens,) int array, residue number per token.
       chain_id_to_asym_int: mapping chain letter → asym_id int.
       max_atoms_per_token: positions layout second dim.
 
@@ -691,18 +645,20 @@ class CombinedRestraints:
       asym_int_to_chain = {v: k for k, v in chain_id_to_asym_int.items()}
       for token_idx, asym_int in enumerate(token_asym_ids):
         chain_letter = asym_int_to_chain.get(int(asym_int), '')
-        resid = int(token_res_ids[token_idx])
-        # flat index for this token (within_token_idx=0)
-        flat_idx = int(token_idx) * max_atoms_per_token
-        candidate = {
-            'chain': chain_letter,
-            'resid': resid,
-            'index': flat_idx,
-        }
-        if sel1.matches(candidate):
-          sites1.append(flat_idx)
-        if sel2.matches(candidate):
-          sites2.append(flat_idx)
+        resid = token_idx + 1
+        for within_token_idx in range(max_atoms_per_token):
+          if not bool(ref_mask[token_idx, within_token_idx]):
+            continue
+          flat_idx = int(token_idx) * max_atoms_per_token + within_token_idx
+          candidate = {
+              'chain': chain_letter,
+              'resid': resid,
+              'index': flat_idx,
+          }
+          if sel1.matches(candidate):
+            sites1.append(flat_idx)
+          if sel2.matches(candidate):
+            sites2.append(flat_idx)
 
       if not sites1:
         raise ValueError(f'atom_selection1 "{dr.atom_selection1}" matched no atoms')

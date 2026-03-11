@@ -805,7 +805,7 @@ class Ligand:
   ccd_ids: Sequence[str] | None = None
   smiles: str | None = None
   description: str | None = None
-  conformer_restraints: bool = True
+  conformer_restraints: bool = False
 
   def __post_init__(self):
     if (self.ccd_ids is None) == (self.smiles is None):
@@ -860,7 +860,7 @@ class Ligand:
           f'got CCD: {json_dict["ccdCodes"]} and SMILES: {json_dict["smiles"]}'
       )
 
-    conformer_restraints = bool(json_dict.get('conformer_restraints', True))
+    conformer_restraints = bool(json_dict.get('conformer_restraints', False))
 
     if 'ccdCodes' in json_dict:
       ccd_codes = json_dict['ccdCodes']

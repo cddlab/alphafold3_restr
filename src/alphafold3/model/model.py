@@ -314,17 +314,15 @@ class Model(hk.Module):
       num_iter = self.config.num_recycles + 1
       embeddings, _ = hk.fori_loop(0, num_iter, recycle_body, (embeddings, key))
 
-    # GPU restraints are injected inside the diffusion scan.
-    # CPU restraints must be applied by the caller after this function returns
-    # via restraints.apply_cpu_postprocess(samples).
-    gpu_restraints = (
-        restraints if (restraints is not None and restraints.config.use_gpu) else None
+    # Restraints are injected inside the diffusion scan on every denoising step.
+    active_restraints = (
+        restraints if (restraints is not None and restraints.is_active()) else None
     )
     samples = self._sample_diffusion(
         batch,
         embeddings,
         sample_config=self.config.heads.diffusion.eval,
-        restraints=gpu_restraints,
+        restraints=active_restraints,
     )
 
     # Compute dist_error_fn over all samples for distance error logging.

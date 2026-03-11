@@ -8,8 +8,7 @@
 Supports conformer restraints (bond/angle/chiral volumes for ligands)
 and distance restraints (COM distance between atom groups).
 
-GPU mode: JAX gradient descent (jax.lax.fori_loop) inside the diffusion scan.
-CPU mode: scipy CG minimization applied once after the full diffusion loop.
+Restraints are applied step-wise inside the diffusion scan via a JAX minimizer.
 """
 
 from alphafold3.model.restraints.combined_restraints import CombinedRestraints

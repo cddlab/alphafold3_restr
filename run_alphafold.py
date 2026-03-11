@@ -435,7 +435,7 @@ class ModelRunner:
     )
 
   def _build_model_with_restraints(self, restraints) -> Callable:
-    """Returns a JIT-compiled forward pass with GPU restraints in closure.
+    """Returns a JIT-compiled forward pass with restraints in closure.
 
     The restraints object is captured by closure so its JAX arrays become
     constants in the compiled XLA program. A new function is compiled per
@@ -463,8 +463,8 @@ class ModelRunner:
       featurised_example: featurised input batch.
       rng_key: JAX random key.
       restraints: optional CombinedRestraints for guided sampling.
-        GPU mode: injected inside the diffusion loop (recompiles XLA program).
-        CPU mode: apply restraints.apply_cpu_postprocess() after this call.
+        Active restraints are injected inside the diffusion loop and therefore
+        require a dedicated compiled forward function.
 
     Returns:
       Model result dict.
@@ -476,8 +476,8 @@ class ModelRunner:
         self._device,
     )
 
-    # Select model fn: GPU restraints require a specially compiled function.
-    if restraints is not None and restraints.config.use_gpu and restraints.is_active():
+    # Select model fn: active restraints require a specially compiled function.
+    if restraints is not None and restraints.is_active():
       model_fn = self._build_model_with_restraints(restraints)
     else:
       model_fn = self._model
@@ -556,8 +556,8 @@ def build_restraints(
   config = RestraintConfig.from_dict(restraint_cfg)
 
   token_asym_ids = np.array(example['asym_id'])  # (num_tokens,)
-  token_res_ids = np.array(example['residue_index'])  # (num_tokens,)
-  ref_pos = np.array(example['ref_pos'])          # (num_tokens, max_per, 3)
+  ref_mask = np.array(example['ref_mask'])       # (num_tokens, max_per)
+  ref_pos = np.array(example['ref_pos'])         # (num_tokens, max_per, 3)
   max_atoms_per_token = ref_pos.shape[1]
 
   # Build chain_id → asym_id mapping from fold_input chain order.
@@ -669,7 +669,7 @@ def build_restraints(
     distance_raw_data = CombinedRestraints.resolve_distance_restraints(
         distance_configs=restraint_cfg['distance_restraints_config'],
         token_asym_ids=token_asym_ids,
-        token_res_ids=token_res_ids,
+        ref_mask=ref_mask,
         chain_id_to_asym_int=chain_id_to_asym_int,
         max_atoms_per_token=max_atoms_per_token,
     )
@@ -736,8 +736,10 @@ def predict_structure(
     print('Building restraints...')
     restraints = build_restraints(fold_input, featurised_examples[0])
     if restraints is not None and restraints.is_active():
-      mode = 'GPU gradient descent' if restraints.config.use_gpu else 'CPU scipy'
-      print(f'Restraints active: {restraints.n_active} atoms, mode={mode}')
+      print(
+          'Restraints active: '
+          f'{restraints.n_active} atoms, mode=step-wise JAX minimization'
+      )
 
   print(
       'Running model inference and extracting output structure samples with'
@@ -750,13 +752,6 @@ def predict_structure(
     inference_start_time = time.time()
     rng_key = jax.random.PRNGKey(seed)
     result = model_runner.run_inference(example, rng_key, restraints=restraints)
-
-    # CPU mode: apply scipy refinement after diffusion (outside JAX JIT).
-    if restraints is not None and not restraints.config.use_gpu and restraints.is_active():
-      print(f'Applying CPU restraint refinement with seed {seed}...')
-      result['diffusion_samples'] = restraints.apply_cpu_postprocess(
-          result['diffusion_samples']
-      )
 
     print(
         f'Running model inference with seed {seed} took'

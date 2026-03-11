@@ -19,7 +19,7 @@ Usage:
   selector = AtomSelector("chain A and resid 1 to 10")
   selector.matches({"chain": "A", "resid": 5, "index": 120})  # -> True
 
-In AF3, resid corresponds to the residue numbering stored in `all_tokens.res_id`.
+To match Protenix, `resid` corresponds to the 1-based token index.
 """
 from __future__ import annotations
 

@@ -10,7 +10,7 @@ where n_active is the number of restrained atoms (active sites).
 Indices in bond/angle/chiral/distance arrays refer to positions WITHIN
 the active sites array (local indices), not global flat indices.
 
-Used in GPU mode via jax.lax.fori_loop gradient descent.
+Used by the in-scan JAX gradient-descent minimizer.
 All functions are differentiable via jax.grad / jax.value_and_grad.
 """
 
@@ -232,7 +232,7 @@ def distance_energy(
     target1: (n_dist,) lower target distances (or harmonic target).
     target2: (n_dist,) upper target distances.
     dist_type: (n_dist,) int32 restraint type code.
-    weight: (n_dist,) energy weight.
+    weight: (n_dist,) unused compatibility field.
     restr_mask: (n_dist,) bool, 1 for valid distance restraints.
 
   Returns:
@@ -267,7 +267,8 @@ def distance_energy(
                               jnp.where(dist_type == 2, jnp.minimum(0.0, dist - target1),
                                         delta_upper)))
 
-  energy_per_dist = weight * delta ** 2 * restr_mask
+  del weight
+  energy_per_dist = delta ** 2 * restr_mask
   return jnp.sum(energy_per_dist)
 
 
