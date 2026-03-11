@@ -426,10 +426,12 @@ class CombinedRestraints:
         x_opt = jax_energy.minimize_bfgs(
             x0, energy_fn, self.config.max_iter
         )
+        x_opt = jnp.where(jnp.all(jnp.isfinite(x_opt)), x_opt, x0)
 
         optimized_active = x_opt.reshape(n_active, 3)
         pos_flat_new = self._scatter_active_positions_jax(pos_flat, optimized_active)
-        return pos_flat_new.reshape(pos.shape)
+        pos_out = pos_flat_new.reshape(pos.shape)
+        return jnp.where(jnp.all(jnp.isfinite(pos_out)), pos_out, pos)
     else:
       out_spec = jax.ShapeDtypeStruct(positions.shape, positions.dtype)
 

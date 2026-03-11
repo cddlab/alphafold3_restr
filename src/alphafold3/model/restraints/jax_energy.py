@@ -384,4 +384,12 @@ def minimize_bfgs(
       method='BFGS',
       options={'maxiter': n_steps},
   )
-  return result.x
+  x_bfgs = result.x
+  x_gd = minimize_gradient_descent(
+      x0,
+      energy_fn,
+      min(n_steps, 200),
+      learning_rate=1e-3,
+  )
+  x_safe = jnp.where(jnp.all(jnp.isfinite(x_bfgs)), x_bfgs, x_gd)
+  return jnp.where(jnp.all(jnp.isfinite(x_safe)), x_safe, x0)
