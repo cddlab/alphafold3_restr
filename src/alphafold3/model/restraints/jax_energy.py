@@ -382,7 +382,6 @@ def minimize_cg(
       fun=energy_fn,
       method='CG',
       maxiter=n_steps,
-      implicit_diff=False,
       jit=True,
   )
   result = solver.run(x0)
