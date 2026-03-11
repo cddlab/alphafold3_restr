@@ -423,8 +423,8 @@ class CombinedRestraints:
             distance_data=self._jax_distance,
         )
 
-        x_opt = jax_energy.minimize_gradient_descent(
-            x0, energy_fn, self.config.max_iter, self.config.learning_rate
+        x_opt = jax_energy.minimize_bfgs(
+            x0, energy_fn, self.config.max_iter
         )
 
         optimized_active = x_opt.reshape(n_active, 3)
