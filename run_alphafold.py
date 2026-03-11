@@ -668,6 +668,7 @@ def build_restraints(
     distance_raw_data = CombinedRestraints.resolve_distance_restraints(
         distance_configs=restraint_cfg['distance_restraints_config'],
         token_asym_ids=token_asym_ids,
+        token_res_ids=token_res_ids,
         chain_id_to_asym_int=chain_id_to_asym_int,
         max_atoms_per_token=max_atoms_per_token,
     )

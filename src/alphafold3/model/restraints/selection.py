@@ -19,7 +19,7 @@ Usage:
   selector = AtomSelector("chain A and resid 1 to 10")
   selector.matches({"chain": "A", "resid": 5, "index": 120})  # -> True
 
-In AF3, resid corresponds to (1-indexed) token index within the chain.
+In AF3, resid corresponds to the residue numbering stored in `all_tokens.res_id`.
 """
 from __future__ import annotations
 
@@ -116,7 +116,9 @@ class SelectionParser:
           self.pos + len(tag) < len(self.text)
           and self.text[self.pos + len(tag)].isalnum()
       ):
-        pass
+        raise ParseError(
+            f"Expected '{tag}' at position {self.pos}, got longer identifier"
+        )
       self.pos += len(tag)
       return tag
     raise ParseError(f"Expected '{tag}' at position {self.pos}")
@@ -305,7 +307,7 @@ class AtomSelector:
     {"chain": str, "resid": int, "index": int}
   where:
     chain  = chain ID letter (e.g. "A", "B")
-    resid  = 1-indexed token/residue index within the chain
+    resid  = residue number from the batch `residue_index` / `all_tokens.res_id`
     index  = global flat position index in the batch layout
   """
 

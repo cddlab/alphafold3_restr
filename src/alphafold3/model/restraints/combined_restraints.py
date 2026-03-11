@@ -613,6 +613,7 @@ class CombinedRestraints:
   def resolve_distance_restraints(
       distance_configs: list[dict],
       token_asym_ids: np.ndarray,
+      token_res_ids: np.ndarray,
       chain_id_to_asym_int: dict[str, int],
       max_atoms_per_token: int,
   ) -> list[DistanceRestraintData]:
@@ -621,6 +622,7 @@ class CombinedRestraints:
     Args:
       distance_configs: list of distance restraint spec dicts.
       token_asym_ids: (num_tokens,) int array, asym_id per token.
+      token_res_ids: (num_tokens,) int array, residue number per token.
       chain_id_to_asym_int: mapping chain letter → asym_id int.
       max_atoms_per_token: positions layout second dim.
 
@@ -638,14 +640,12 @@ class CombinedRestraints:
       asym_int_to_chain = {v: k for k, v in chain_id_to_asym_int.items()}
       for token_idx, asym_int in enumerate(token_asym_ids):
         chain_letter = asym_int_to_chain.get(int(asym_int), '')
-        # resid = 1-indexed position within the chain
-        chain_tokens = np.where(token_asym_ids == asym_int)[0]
-        within_chain_pos = int(np.searchsorted(chain_tokens, token_idx)) + 1
+        resid = int(token_res_ids[token_idx])
         # flat index for this token (within_token_idx=0)
         flat_idx = int(token_idx) * max_atoms_per_token
         candidate = {
             'chain': chain_letter,
-            'resid': within_chain_pos,
+            'resid': resid,
             'index': flat_idx,
         }
         if sel1.matches(candidate):
