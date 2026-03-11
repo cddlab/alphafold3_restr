@@ -556,6 +556,7 @@ def build_restraints(
   config = RestraintConfig.from_dict(restraint_cfg)
 
   token_asym_ids = np.array(example['asym_id'])  # (num_tokens,)
+  token_res_ids = np.array(example['residue_index'])  # (num_tokens,)
   ref_pos = np.array(example['ref_pos'])          # (num_tokens, max_per, 3)
   max_atoms_per_token = ref_pos.shape[1]
 
