@@ -602,8 +602,8 @@ class CombinedRestraints:
     for s in range(num_samples):
       atom_positions[s] = self.minimize_cpu(atom_positions[s])
 
-    import jax.numpy as jnp
-    return {**samples, 'atom_positions': jnp.array(atom_positions)}
+    # Return numpy array so downstream structure_tables code can set flags.writeable.
+    return {**samples, 'atom_positions': atom_positions}
 
   # ------------------------------------------------------------------
   # Resolve distance restraint selections against batch layout
