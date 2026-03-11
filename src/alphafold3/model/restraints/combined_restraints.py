@@ -439,7 +439,12 @@ class CombinedRestraints:
         return refined.astype(pos_np.dtype, copy=False)
 
       def do_minimize(pos):
-        return jax.pure_callback(_cpu_callback, out_spec, pos)
+        return jax.pure_callback(
+            _cpu_callback,
+            out_spec,
+            pos,
+            vmap_method='sequential',
+        )
 
     # Gate on sigma_t: only minimize when noise level is low enough.
     return jax.lax.cond(
