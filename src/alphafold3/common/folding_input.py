@@ -805,6 +805,7 @@ class Ligand:
   ccd_ids: Sequence[str] | None = None
   smiles: str | None = None
   description: str | None = None
+  conformer_restraints: bool = True
 
   def __post_init__(self):
     if (self.ccd_ids is None) == (self.smiles is None):
@@ -850,13 +851,16 @@ class Ligand:
     """Constructs Ligand from the AlphaFold JSON dict."""
     json_dict = json_dict['ligand']
     _validate_keys(
-        json_dict.keys(), {'id', 'ccdCodes', 'smiles', 'description'}
+        json_dict.keys(),
+        {'id', 'ccdCodes', 'smiles', 'description', 'conformer_restraints'},
     )
     if json_dict.get('ccdCodes') and json_dict.get('smiles'):
       raise ValueError(
           'Ligand cannot have both CCD code and SMILES set at the same time, '
           f'got CCD: {json_dict["ccdCodes"]} and SMILES: {json_dict["smiles"]}'
       )
+
+    conformer_restraints = bool(json_dict.get('conformer_restraints', True))
 
     if 'ccdCodes' in json_dict:
       ccd_codes = json_dict['ccdCodes']
@@ -869,12 +873,14 @@ class Ligand:
           id=seq_id or json_dict['id'],
           ccd_ids=ccd_codes,
           description=json_dict.get('description', None),
+          conformer_restraints=conformer_restraints,
       )
     elif 'smiles' in json_dict:
       return cls(
           id=seq_id or json_dict['id'],
           smiles=json_dict['smiles'],
           description=json_dict.get('description', None),
+          conformer_restraints=conformer_restraints,
       )
     else:
       raise ValueError(f'Unknown ligand type: {json_dict}')
@@ -957,6 +963,7 @@ class Input:
   rng_seeds: Sequence[int]
   bonded_atom_pairs: Sequence[tuple[BondAtomId, BondAtomId]] | None = None
   user_ccd: str | None = None
+  restraints_config: dict | None = None
 
   def __post_init__(self):
     if not self.rng_seeds:
@@ -1117,6 +1124,7 @@ class Input:
             'bondedAtomPairs',
             'userCCD',
             'userCCDPath',
+            'restraints_config',
         },
     )
 
@@ -1248,6 +1256,7 @@ class Input:
         rng_seeds=[int(seed) for seed in raw_json['modelSeeds']],
         bonded_atom_pairs=bonded_atom_pairs,
         user_ccd=user_ccd,
+        restraints_config=raw_json.get('restraints_config'),
     )
 
   @classmethod

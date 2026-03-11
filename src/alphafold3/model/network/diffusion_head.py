@@ -299,6 +299,7 @@ def sample(
     batch: feat_batch.Batch,
     key: jnp.ndarray,
     config: SampleConfig,
+    restraints=None,
 ) -> dict[str, jnp.ndarray]:
   """Sample using denoiser on batch.
 
@@ -308,6 +309,9 @@ def sample(
     key: random key
     config: config for the sampling process (e.g. number of denoising steps,
       etc.)
+    restraints: optional CombinedRestraints for guided sampling (GPU mode only).
+      If use_gpu=True, JAX gradient descent is applied after each denoising step.
+      If use_gpu=False or None, no restraints are applied in this function.
 
   Returns:
     a dict
@@ -337,6 +341,13 @@ def sample(
     positions_noisy = positions + noise
 
     positions_denoised = denoising_step(positions_noisy, t_hat)
+
+    # GPU restraint injection: gradient descent on denoised positions.
+    # Python conditional evaluated at trace time; jax.lax.cond inside
+    # minimize_gpu handles the runtime sigma-gating.
+    if restraints is not None and restraints.config.use_gpu:
+      positions_denoised = restraints.minimize_gpu(positions_denoised, noise_level_prev)
+
     grad = (positions_noisy - positions_denoised) / t_hat
 
     d_t = noise_level - t_hat

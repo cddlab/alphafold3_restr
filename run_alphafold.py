@@ -47,6 +47,10 @@ from alphafold3.model import model
 from alphafold3.model import params
 from alphafold3.model import post_processing
 from alphafold3.model.components import utils
+from alphafold3.model.restraints.combined_restraints import CombinedRestraints
+from alphafold3.model.restraints.combined_restraints import RestraintConfig
+from alphafold3.model.restraints.conformer_featurizer import build_ligand_flat_indices
+from alphafold3.model.restraints.conformer_featurizer import ConformerFeaturizer
 import haiku as hk
 import jax
 from jax import numpy as jnp
@@ -430,10 +434,41 @@ class ModelRunner:
         jax.jit(forward_fn.apply, device=self._device), self.model_params
     )
 
+  def _build_model_with_restraints(self, restraints) -> Callable:
+    """Returns a JIT-compiled forward pass with GPU restraints in closure.
+
+    The restraints object is captured by closure so its JAX arrays become
+    constants in the compiled XLA program. A new function is compiled per
+    unique restraints configuration.
+    """
+    config = self._model_config
+
+    @hk.transform
+    def forward_fn(batch):
+      return model.Model(config)(batch, restraints=restraints)
+
+    return functools.partial(
+        jax.jit(forward_fn.apply, device=self._device), self.model_params
+    )
+
   def run_inference(
-      self, featurised_example: features.BatchDict, rng_key: jnp.ndarray
+      self,
+      featurised_example: features.BatchDict,
+      rng_key: jnp.ndarray,
+      restraints=None,
   ) -> model.ModelResult:
-    """Computes a forward pass of the model on a featurised example."""
+    """Computes a forward pass of the model on a featurised example.
+
+    Args:
+      featurised_example: featurised input batch.
+      rng_key: JAX random key.
+      restraints: optional CombinedRestraints for guided sampling.
+        GPU mode: injected inside the diffusion loop (recompiles XLA program).
+        CPU mode: apply restraints.apply_cpu_postprocess() after this call.
+
+    Returns:
+      Model result dict.
+    """
     featurised_example = jax.device_put(
         jax.tree_util.tree_map(
             jnp.asarray, utils.remove_invalidly_typed_feats(featurised_example)
@@ -441,7 +476,13 @@ class ModelRunner:
         self._device,
     )
 
-    result = self._model(rng_key, featurised_example)
+    # Select model fn: GPU restraints require a specially compiled function.
+    if restraints is not None and restraints.config.use_gpu and restraints.is_active():
+      model_fn = self._build_model_with_restraints(restraints)
+    else:
+      model_fn = self._model
+
+    result = model_fn(rng_key, featurised_example)
     result = jax.tree.map(np.asarray, result)
     result = jax.tree.map(
         lambda x: x.astype(jnp.float32) if x.dtype == jnp.bfloat16 else x,
@@ -490,6 +531,155 @@ class ModelRunner:
     return distogram
 
 
+def build_restraints(
+    fold_input: folding_input.Input,
+    example: features.BatchDict,
+) -> 'CombinedRestraints | None':
+  """Build CombinedRestraints from fold_input.restraints_config and a featurised batch.
+
+  Args:
+    fold_input: Folding input with optional .restraints_config dict.
+    example: A featurised batch (numpy arrays). Used to resolve atom indices.
+
+  Returns:
+    CombinedRestraints instance, or None if fold_input.restraints_config is not set.
+  """
+  if fold_input.restraints_config is None:
+    return None
+
+  try:
+    from rdkit import Chem  # pylint: disable=g-import-not-at-top
+  except ImportError:
+    Chem = None
+
+  restraint_cfg = fold_input.restraints_config
+  config = RestraintConfig.from_dict(restraint_cfg)
+
+  token_asym_ids = np.array(example['asym_id'])  # (num_tokens,)
+  ref_pos = np.array(example['ref_pos'])          # (num_tokens, max_per, 3)
+  max_atoms_per_token = ref_pos.shape[1]
+
+  # Build chain_id → asym_id mapping from fold_input chain order.
+  # Asym IDs are assigned 1, 2, 3, ... in order of unique chains.
+  chain_id_to_asym_int = {
+      chain.id: i + 1 for i, chain in enumerate(fold_input.chains)
+  }
+
+  # Build conformer restraints for ligands where conformer_restraints=True.
+  # Only SMILES-based ligands have a mol graph for bond/angle/chiral extraction.
+  conformer_raw_data = None
+  conformer_cfg = restraint_cfg.get('conformer_restraints_config', {})
+  if conformer_cfg and Chem is not None:
+    bond_cfg = conformer_cfg.get('bond', {})
+    angle_cfg = conformer_cfg.get('angle', {})
+    chiral_cfg = conformer_cfg.get('chiral', {})
+    vdw_cfg = conformer_cfg.get('vdw', {})
+
+    combined_flat = set()
+    combined_bonds, combined_angles, combined_chirals, combined_vdws = [], [], [], []
+
+    for chain in fold_input.chains:
+      if not isinstance(chain, folding_input.Ligand):
+        continue
+      # Skip ligands that opt out of conformer restraints.
+      if not chain.conformer_restraints:
+        continue
+      if chain.smiles is None:
+        # CCD-based ligands: conformer restraints not yet supported.
+        continue
+      mol = Chem.MolFromSmiles(chain.smiles)
+      if mol is None:
+        continue
+
+      # Get flat indices for this ligand chain.
+      flat_indices = build_ligand_flat_indices(
+          chain_id=chain.id,
+          token_asym_ids=token_asym_ids,
+          chain_id_to_asym_int=chain_id_to_asym_int,
+          max_atoms_per_token=max_atoms_per_token,
+      )
+      if len(flat_indices) == 0:
+        continue
+
+      # Extract reference coordinates for ligand atoms.
+      pos_flat = ref_pos.reshape(-1, 3)
+      conf_crds = pos_flat[flat_indices]  # (n_atoms, 3)
+
+      feat = ConformerFeaturizer(
+          mol=mol,
+          conf_crds=conf_crds,
+          flat_indices=flat_indices,
+          bond_config=bond_cfg,
+          angle_config=angle_cfg,
+          chiral_config=chiral_cfg,
+          vdw_config=vdw_cfg,
+          verbose=config.verbose,
+      )
+      chain_data = feat.build()
+
+      # Merge into combined results.
+      combined_flat.update(int(x) for x in chain_data['all_flat_indices'])
+      if chain_data.get('bond') is not None:
+        combined_bonds.append(chain_data['bond'])
+      if chain_data.get('angle') is not None:
+        combined_angles.append(chain_data['angle'])
+      if chain_data.get('chiral') is not None:
+        combined_chirals.append(chain_data['chiral'])
+      if chain_data.get('vdw') is not None:
+        combined_vdws.append(chain_data['vdw'])
+
+    if combined_flat:
+      def _cat(arrays, key):
+        return np.concatenate([a[key] for a in arrays])
+
+      conformer_raw_data = {
+          'all_flat_indices': np.array(sorted(combined_flat), dtype=np.int32),
+      }
+      if combined_bonds:
+        conformer_raw_data['bond'] = {
+            k: _cat(combined_bonds, k) for k in ('flat_i', 'flat_j', 'r0', 'slack', 'weight')
+        }
+      else:
+        conformer_raw_data['bond'] = None
+      if combined_angles:
+        conformer_raw_data['angle'] = {
+            k: _cat(combined_angles, k)
+            for k in ('flat_i', 'flat_j', 'flat_k', 'th0', 'slack', 'weight')
+        }
+      else:
+        conformer_raw_data['angle'] = None
+      if combined_chirals:
+        conformer_raw_data['chiral'] = {
+            k: _cat(combined_chirals, k)
+            for k in ('flat_center', 'flat_n1', 'flat_n2', 'flat_n3', 'vol0', 'slack', 'weight')
+        }
+      else:
+        conformer_raw_data['chiral'] = None
+      if combined_vdws:
+        conformer_raw_data['vdw'] = {
+            k: _cat(combined_vdws, k) for k in ('flat_i', 'flat_j', 'r_min', 'weight')
+        }
+      else:
+        conformer_raw_data['vdw'] = None
+
+  # Build distance restraints.
+  distance_raw_data = None
+  if restraint_cfg.get('distance_restraints_config'):
+    distance_raw_data = CombinedRestraints.resolve_distance_restraints(
+        distance_configs=restraint_cfg['distance_restraints_config'],
+        token_asym_ids=token_asym_ids,
+        chain_id_to_asym_int=chain_id_to_asym_int,
+        max_atoms_per_token=max_atoms_per_token,
+    )
+
+  return CombinedRestraints.from_config(
+      config=config,
+      batch_dict={'ref_mask': np.array(example['ref_mask'])},
+      conformer_raw_data=conformer_raw_data,
+      distance_raw_data=distance_raw_data,
+  )
+
+
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
 class ResultsForSeed:
   """Stores the inference results (diffusion samples) for a single seed.
@@ -536,6 +726,17 @@ def predict_structure(
       f'Featurising data with {len(fold_input.rng_seeds)} seed(s) took'
       f' {time.time() - featurisation_start_time:.2f} seconds.'
   )
+
+  # Build restraints once from the first featurised example.
+  # Restraints are the same across seeds (same molecule structure).
+  restraints = None
+  if fold_input.restraints_config is not None:
+    print('Building restraints...')
+    restraints = build_restraints(fold_input, featurised_examples[0])
+    if restraints is not None and restraints.is_active():
+      mode = 'GPU gradient descent' if restraints.config.use_gpu else 'CPU scipy'
+      print(f'Restraints active: {restraints.n_active} atoms, mode={mode}')
+
   print(
       'Running model inference and extracting output structure samples with'
       f' {len(fold_input.rng_seeds)} seed(s)...'
@@ -546,7 +747,15 @@ def predict_structure(
     print(f'Running model inference with seed {seed}...')
     inference_start_time = time.time()
     rng_key = jax.random.PRNGKey(seed)
-    result = model_runner.run_inference(example, rng_key)
+    result = model_runner.run_inference(example, rng_key, restraints=restraints)
+
+    # CPU mode: apply scipy refinement after diffusion (outside JAX JIT).
+    if restraints is not None and not restraints.config.use_gpu and restraints.is_active():
+      print(f'Applying CPU restraint refinement with seed {seed}...')
+      result['diffusion_samples'] = restraints.apply_cpu_postprocess(
+          result['diffusion_samples']
+      )
+
     print(
         f'Running model inference with seed {seed} took'
         f' {time.time() - inference_start_time:.2f} seconds.'
