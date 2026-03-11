@@ -403,53 +403,45 @@ class CombinedRestraints:
       positions: jnp.ndarray,
       sigma_t: jnp.ndarray,
   ) -> jnp.ndarray:
-    """Apply JAX gradient descent on active atoms.
-
-    Called per-sample inside apply_denoising_step (after hk.vmap).
-
-    Args:
-      positions: (num_tokens, max_atoms_per_token, 3) single-sample positions.
-      sigma_t: scalar noise level at current step.
-
-    Returns:
-      Updated positions with same shape.
-    """
+    """Apply one restraint-minimization step on active atoms."""
     if not self.is_active():
       return positions
 
-    active_sites_jax = jnp.array(self.active_sites, dtype=jnp.int32)
-    n_active = self.n_active
-    max_per = self.max_atoms_per_token
+    if self.config.use_gpu:
+      active_sites_jax = jnp.array(self.active_sites, dtype=jnp.int32)
+      n_active = self.n_active
 
-    def do_minimize(pos):
-      # Flatten to (N_flat, 3)
-      pos_flat = pos.reshape(-1, 3)
-      # Extract active sites
-      active_pos = pos_flat[active_sites_jax]  # (n_active, 3)
-      x0 = active_pos.reshape(-1)
+      def do_minimize(pos):
+        pos_flat = pos.reshape(-1, 3)
+        active_pos = pos_flat[active_sites_jax]
+        x0 = active_pos.reshape(-1)
 
-      # Build energy function capturing JAX arrays in closure
-      jax_conf = self._jax_conformer
-      jax_dist = self._jax_distance
+        energy_fn = functools.partial(
+            jax_energy.total_energy,
+            n_active=n_active,
+            conformer_data=self._jax_conformer,
+            distance_data=self._jax_distance,
+        )
 
-      energy_fn = functools.partial(
-          jax_energy.total_energy,
-          n_active=n_active,
-          conformer_data=jax_conf,
-          distance_data=jax_dist,
-      )
+        x_opt = jax_energy.minimize_gradient_descent(
+            x0, energy_fn, self.config.max_iter, self.config.learning_rate
+        )
 
-      # Gradient descent
-      x_opt = jax_energy.minimize_gradient_descent(
-          x0, energy_fn, self.config.max_iter, self.config.learning_rate
-      )
+        optimized_active = x_opt.reshape(n_active, 3)
+        pos_flat_new = self._scatter_active_positions_jax(pos_flat, optimized_active)
+        return pos_flat_new.reshape(pos.shape)
+    else:
+      out_spec = jax.ShapeDtypeStruct(positions.shape, positions.dtype)
 
-      # Scatter back
-      optimized_active = x_opt.reshape(n_active, 3)
-      pos_flat_new = self._scatter_active_positions_jax(pos_flat, optimized_active)
-      return pos_flat_new.reshape(pos.shape)
+      def _cpu_callback(pos):
+        pos_np = np.asarray(pos)
+        refined = self.minimize_cpu(pos_np)
+        return refined.astype(pos_np.dtype, copy=False)
 
-    # Gate on sigma_t: only minimize when noise level is low enough
+      def do_minimize(pos):
+        return jax.pure_callback(_cpu_callback, out_spec, pos)
+
+    # Gate on sigma_t: only minimize when noise level is low enough.
     return jax.lax.cond(
         sigma_t <= jnp.array(self.config.start_sigma, dtype=sigma_t.dtype),
         do_minimize,
@@ -537,14 +529,47 @@ class CombinedRestraints:
     return ene
 
   def _numpy_grad(self, crds_flat: np.ndarray) -> np.ndarray:
-    """CPU numpy gradient for scipy (finite differences)."""
-    eps = 1e-4
-    grad = np.zeros_like(crds_flat)
-    for i in range(len(crds_flat)):
-      x_plus = crds_flat.copy(); x_plus[i] += eps
-      x_minus = crds_flat.copy(); x_minus[i] -= eps
-      grad[i] = (self._numpy_energy(x_plus) - self._numpy_energy(x_minus)) / (2 * eps)
-    return grad
+    """CPU numpy gradient for scipy."""
+    if self.conformer_raw is not None:
+      eps = 1e-4
+      grad = np.zeros_like(crds_flat)
+      for i in range(len(crds_flat)):
+        x_plus = crds_flat.copy()
+        x_plus[i] += eps
+        x_minus = crds_flat.copy()
+        x_minus[i] -= eps
+        grad[i] = (
+            self._numpy_energy(x_plus) - self._numpy_energy(x_minus)
+        ) / (2 * eps)
+      return grad
+
+    crds = crds_flat.reshape(self.n_active, 3)
+    grad = np.zeros_like(crds)
+    for dr in self.distance_restraints:
+      ls1 = [self._global_to_local[g] for g in dr.global_sites1]
+      ls2 = [self._global_to_local[g] for g in dr.global_sites2]
+      com1 = np.mean(crds[ls1], axis=0)
+      com2 = np.mean(crds[ls2], axis=0)
+      com_vector = com2 - com1
+      dist = np.linalg.norm(com_vector)
+      if dist < 1e-8:
+        continue
+      if dr.distance_type == 'harmonic':
+        delta = dist - dr.target1
+      elif dr.distance_type in ('flat-bottomed', 'flat-bottomed1') and dist < dr.target1:
+        delta = dist - dr.target1
+      elif dr.distance_type in ('flat-bottomed', 'flat-bottomed2') and dist > dr.target2:
+        delta = dist - dr.target2
+      else:
+        delta = 0.0
+      if abs(delta) < 1e-9:
+        continue
+      grad_com = 2.0 * delta * com_vector / dist
+      grad_atom1 = -grad_com / len(ls1)
+      grad_atom2 = grad_com / len(ls2)
+      grad[ls1, :] += grad_atom1
+      grad[ls2, :] += grad_atom2
+    return grad.reshape(-1)
 
   def minimize_cpu(self, positions_np: np.ndarray) -> np.ndarray:
     """Apply scipy CG minimization to a single sample's positions.
