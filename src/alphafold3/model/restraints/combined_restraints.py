@@ -186,6 +186,14 @@ class CombinedRestraints:
         int(g): l for l, g in enumerate(active_sites)
     }
     self.n_active = len(active_sites)
+    self._distance_anchor_globals = np.array(
+        sorted({
+            int(g)
+            for dr in distance_restraints
+            for g in (*dr.global_sites1, *dr.global_sites2)
+        }),
+        dtype=np.int32,
+    )
 
     # JAX arrays for GPU mode (set in _build_jax_arrays)
     self._jax_conformer: dict | None = None
@@ -266,6 +274,50 @@ class CombinedRestraints:
 
   def _to_local(self, global_idx: int) -> int:
     return self._global_to_local[global_idx]
+
+  def _scatter_active_positions_numpy(
+      self,
+      pos_flat: np.ndarray,
+      optimized_active: np.ndarray,
+  ) -> np.ndarray:
+    """Scatter optimized active coordinates back to the full flat layout.
+
+    Distance restraints are resolved on one anchor atom per token for polymers.
+    To avoid tearing the polymer apart, the anchor displacement is propagated as
+    a rigid translation to every atom within the same token.
+    """
+    pos_flat_new = pos_flat.copy()
+    pos_flat_new[self.active_sites] = optimized_active.astype(pos_flat.dtype)
+
+    for global_idx in self._distance_anchor_globals:
+      token_idx = int(global_idx) // self.max_atoms_per_token
+      start = token_idx * self.max_atoms_per_token
+      end = start + self.max_atoms_per_token
+      local_idx = self._global_to_local[int(global_idx)]
+      delta = optimized_active[local_idx] - pos_flat[int(global_idx)]
+      pos_flat_new[start:end] = (pos_flat[start:end] + delta).astype(pos_flat.dtype)
+
+    return pos_flat_new
+
+  def _scatter_active_positions_jax(
+      self,
+      pos_flat: jnp.ndarray,
+      optimized_active: jnp.ndarray,
+  ) -> jnp.ndarray:
+    """JAX equivalent of `_scatter_active_positions_numpy`."""
+    pos_flat_new = pos_flat.at[jnp.array(self.active_sites, dtype=jnp.int32)].set(
+        optimized_active
+    )
+
+    for global_idx in self._distance_anchor_globals.tolist():
+      token_idx = int(global_idx) // self.max_atoms_per_token
+      start = token_idx * self.max_atoms_per_token
+      end = start + self.max_atoms_per_token
+      local_idx = self._global_to_local[int(global_idx)]
+      delta = optimized_active[local_idx] - pos_flat[int(global_idx)]
+      pos_flat_new = pos_flat_new.at[start:end].set(pos_flat[start:end] + delta)
+
+    return pos_flat_new
 
   def _flat_pair_to_local(self, flat_i: np.ndarray, flat_j: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     li = np.array([self._global_to_local[int(x)] for x in flat_i], dtype=np.int32)
@@ -439,7 +491,7 @@ class CombinedRestraints:
 
       # Scatter back
       optimized_active = x_opt.reshape(n_active, 3)
-      pos_flat_new = pos_flat.at[active_sites_jax].set(optimized_active)
+      pos_flat_new = self._scatter_active_positions_jax(pos_flat, optimized_active)
       return pos_flat_new.reshape(pos.shape)
 
     # Gate on sigma_t: only minimize when noise level is low enough
@@ -575,8 +627,7 @@ class CombinedRestraints:
             f'success={opt.success}')
 
     optimized = opt.x.reshape(len(active_sites), 3)
-    pos_flat_new = pos_flat.copy()
-    pos_flat_new[active_sites] = optimized.astype(pos_flat.dtype)
+    pos_flat_new = self._scatter_active_positions_numpy(pos_flat, optimized)
     return pos_flat_new.reshape(positions_np.shape)
 
   def apply_cpu_postprocess(
