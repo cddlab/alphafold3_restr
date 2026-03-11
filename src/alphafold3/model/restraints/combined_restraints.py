@@ -407,6 +407,21 @@ class CombinedRestraints:
     if not self.is_active():
       return positions
 
+    out_spec = jax.ShapeDtypeStruct(positions.shape, positions.dtype)
+
+    def _cpu_callback(pos):
+      pos_np = np.asarray(pos)
+      refined = self.minimize_cpu(pos_np)
+      return refined.astype(pos_np.dtype, copy=False)
+
+    def _cpu_fallback(pos):
+      return jax.pure_callback(
+          _cpu_callback,
+          out_spec,
+          pos,
+          vmap_method='sequential',
+      )
+
     if self.config.use_gpu:
       active_sites_jax = jnp.array(self.active_sites, dtype=jnp.int32)
       n_active = self.n_active
@@ -423,30 +438,29 @@ class CombinedRestraints:
             distance_data=self._jax_distance,
         )
 
-        x_opt = jax_energy.minimize_bfgs(
+        x_opt = jax_energy.minimize_cg(
             x0, energy_fn, self.config.max_iter
         )
-        x_opt = jnp.where(jnp.all(jnp.isfinite(x_opt)), x_opt, x0)
-
         optimized_active = x_opt.reshape(n_active, 3)
         pos_flat_new = self._scatter_active_positions_jax(pos_flat, optimized_active)
         pos_out = pos_flat_new.reshape(pos.shape)
-        return jnp.where(jnp.all(jnp.isfinite(pos_out)), pos_out, pos)
-    else:
-      out_spec = jax.ShapeDtypeStruct(positions.shape, positions.dtype)
 
-      def _cpu_callback(pos):
-        pos_np = np.asarray(pos)
-        refined = self.minimize_cpu(pos_np)
-        return refined.astype(pos_np.dtype, copy=False)
-
-      def do_minimize(pos):
-        return jax.pure_callback(
-            _cpu_callback,
-            out_spec,
-            pos,
-            vmap_method='sequential',
+        max_abs_coord = jnp.max(jnp.abs(pos_out))
+        max_abs_delta = jnp.max(jnp.abs(pos_out - pos))
+        is_valid = (
+            jnp.all(jnp.isfinite(pos_out))
+            & (max_abs_coord < 1e4)
+            & (max_abs_delta < 1e3)
         )
+        return jax.lax.cond(
+            is_valid,
+            lambda _: pos_out,
+            _cpu_fallback,
+            pos,
+        )
+    else:
+      def do_minimize(pos):
+        return _cpu_fallback(pos)
 
     # Gate on sigma_t: only minimize when noise level is low enough.
     return jax.lax.cond(

@@ -20,7 +20,7 @@ import functools
 
 import jax
 import jax.numpy as jnp
-from jax.scipy import optimize as jsp_optimize
+from jaxopt import ScipyMinimize
 
 
 # ---------------------------------------------------------------------------
@@ -368,28 +368,29 @@ def minimize_gradient_descent(
   return jax.lax.fori_loop(0, n_steps, step, x0)
 
 
-def minimize_bfgs(
+def minimize_cg(
     x0: jnp.ndarray,
     energy_fn,
     n_steps: int,
 ) -> jnp.ndarray:
-  """BFGS minimization using ``jax.scipy.optimize.minimize``.
+  """CG minimization using ``jaxopt.ScipyMinimize``.
 
-  This is a closer match to Protenix's CG-style inner-loop optimizer than the
-  fixed-step gradient descent fallback.
+  This matches the requested GPU optimizer backend more closely than the
+  previous BFGS implementation.
   """
-  result = jsp_optimize.minimize(
-      energy_fn,
-      x0,
-      method='BFGS',
-      options={'maxiter': n_steps},
+  solver = ScipyMinimize(
+      fun=energy_fn,
+      method='CG',
+      maxiter=n_steps,
+      jit=True,
   )
-  x_bfgs = result.x
+  result = solver.run(x0)
+  x_cg = result.params
   x_gd = minimize_gradient_descent(
       x0,
       energy_fn,
       min(n_steps, 200),
       learning_rate=1e-3,
   )
-  x_safe = jnp.where(jnp.all(jnp.isfinite(x_bfgs)), x_bfgs, x_gd)
+  x_safe = jnp.where(jnp.all(jnp.isfinite(x_cg)), x_cg, x_gd)
   return jnp.where(jnp.all(jnp.isfinite(x_safe)), x_safe, x0)

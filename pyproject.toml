@@ -19,6 +19,7 @@ dependencies = [
     "dm-haiku==0.0.16",
     "jax==0.8.2",
     "jax[cuda12]==0.8.2",
+    "jaxopt>=0.8.5",
     "numpy",
     "rdkit==2025.9.4",
     "tokamax==0.0.10",
