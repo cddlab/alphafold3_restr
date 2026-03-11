@@ -297,21 +297,30 @@ def total_energy(
   positions = x.reshape(n_active, 3)
   ene = jnp.array(0.0, dtype=x.dtype)
 
-  if conformer_data.get('bond') is not None:
-    b = conformer_data['bond']
-    ene = ene + bond_energy(positions, b['idx'], b['r0'], b['slack'], b['weight'], b['mask'])
+  if conformer_data is not None:
+    if conformer_data.get('bond') is not None:
+      b = conformer_data['bond']
+      ene = ene + bond_energy(
+          positions, b['idx'], b['r0'], b['slack'], b['weight'], b['mask']
+      )
 
-  if conformer_data.get('angle') is not None:
-    a = conformer_data['angle']
-    ene = ene + angle_energy(positions, a['idx'], a['th0'], a['slack'], a['weight'], a['mask'])
+    if conformer_data.get('angle') is not None:
+      a = conformer_data['angle']
+      ene = ene + angle_energy(
+          positions, a['idx'], a['th0'], a['slack'], a['weight'], a['mask']
+      )
 
-  if conformer_data.get('chiral') is not None:
-    c = conformer_data['chiral']
-    ene = ene + chiral_energy(positions, c['idx'], c['vol0'], c['slack'], c['weight'], c['mask'])
+    if conformer_data.get('chiral') is not None:
+      c = conformer_data['chiral']
+      ene = ene + chiral_energy(
+          positions, c['idx'], c['vol0'], c['slack'], c['weight'], c['mask']
+      )
 
-  if conformer_data.get('vdw') is not None:
-    v = conformer_data['vdw']
-    ene = ene + vdw_energy(positions, v['idx'], v['r_min'], v['weight'], v['mask'])
+    if conformer_data.get('vdw') is not None:
+      v = conformer_data['vdw']
+      ene = ene + vdw_energy(
+          positions, v['idx'], v['r_min'], v['weight'], v['mask']
+      )
 
   if distance_data is not None:
     d = distance_data
