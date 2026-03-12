@@ -213,7 +213,6 @@ def distance_energy(
     target1: jnp.ndarray,
     target2: jnp.ndarray,
     dist_type: jnp.ndarray,
-    weight: jnp.ndarray,
     restr_mask: jnp.ndarray,
 ) -> jnp.ndarray:
   """Distance restraint energy between centers of mass of two atom groups.
@@ -233,7 +232,6 @@ def distance_energy(
     target1: (n_dist,) lower target distances (or harmonic target).
     target2: (n_dist,) upper target distances.
     dist_type: (n_dist,) int32 restraint type code.
-    weight: (n_dist,) unused compatibility field.
     restr_mask: (n_dist,) bool, 1 for valid distance restraints.
 
   Returns:
@@ -268,7 +266,6 @@ def distance_energy(
                               jnp.where(dist_type == 2, jnp.minimum(0.0, dist - target1),
                                         delta_upper)))
 
-  del weight
   energy_per_dist = delta ** 2 * restr_mask
   return jnp.sum(energy_per_dist)
 
@@ -330,7 +327,7 @@ def total_energy(
         d['grp1_idx'], d['grp2_idx'],
         d['grp1_mask'], d['grp2_mask'],
         d['target1'], d['target2'],
-        d['dist_type'], d['weight'], d['mask'],
+        d['dist_type'], d['mask'],
     )
 
   return ene

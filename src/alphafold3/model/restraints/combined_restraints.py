@@ -103,7 +103,6 @@ class DistanceRestraintData:
   distance_type: str   # 'harmonic', 'flat-bottomed', 'flat-bottomed1', 'flat-bottomed2'
   target1: float       # lower bound or harmonic target
   target2: float       # upper bound (only for flat-bottomed)
-  weight: float = 1.0
   global_sites1: list[int] = dataclasses.field(default_factory=list)
   global_sites2: list[int] = dataclasses.field(default_factory=list)
 
@@ -133,7 +132,6 @@ class DistanceRestraintData:
         distance_type=dtype,
         target1=target1,
         target2=target2,
-        weight=float(d.get('weight', 1.0)),
     )
 
   @property
@@ -366,7 +364,6 @@ class CombinedRestraints:
       target1 = np.zeros(n_dist, dtype=np.float32)
       target2 = np.zeros(n_dist, dtype=np.float32)
       dist_type = np.zeros(n_dist, dtype=np.int32)
-      weight = np.zeros(n_dist, dtype=np.float32)
 
       for i, dr in enumerate(self.distance_restraints):
         for j, g in enumerate(dr.global_sites1):
@@ -378,7 +375,6 @@ class CombinedRestraints:
         target1[i] = dr.target1
         target2[i] = dr.target2
         dist_type[i] = dr.type_code
-        weight[i] = dr.weight
 
       self._jax_distance = dict(
           grp1_idx=jnp.array(grp1_idx),
@@ -388,7 +384,6 @@ class CombinedRestraints:
           target1=jnp.array(target1),
           target2=jnp.array(target2),
           dist_type=jnp.array(dist_type),
-          weight=jnp.array(weight),
           mask=jnp.ones(n_dist, dtype=jnp.float32),
       )
     else:
