@@ -5,13 +5,13 @@
 
 """Restraint system for guided diffusion sampling in AlphaFold 3.
 
-Supports conformer restraints (bond/angle/chiral volumes for ligands)
-and distance restraints (COM distance between atom groups).
-
-Restraints are applied step-wise inside the diffusion scan via a JAX minimizer.
+Conformer restraints (bond/angle/chiral + intramolecular VdW for ligands) and
+distance restraints (COM distance between atom groups) are built by rgi_utils
+from the AF3 batch via ``AF3RestraintAdapter`` and applied step-wise inside the
+diffusion scan by a pure-JAX minimizer.
 """
 
-from alphafold3.model.restraints.combined_restraints import CombinedRestraints
-from alphafold3.model.restraints.combined_restraints import RestraintConfig
+from alphafold3.model.restraints.combined_restraints import AF3Restraints
+from alphafold3.model.restraints.combined_restraints import build_restraints
 
-__all__ = ['CombinedRestraints', 'RestraintConfig']
+__all__ = ['AF3Restraints', 'build_restraints']
