@@ -30,7 +30,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from alphafold3.model.restraints.selection import AtomSelector
+from rgi_utils.selection import AtomSelector
 
 
 # ---------------------------------------------------------------------------
