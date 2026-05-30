@@ -581,15 +581,52 @@ def build_restraints(
               int(token_idx) * max_atoms_per_token + within_token_idx,
           )
 
+    # Keep only mol atoms that exist in the AF3 structure. Some CCD atoms (e.g.
+    # glucose O1, a leaving atom) are dropped during AF3 tokenisation; we restrain
+    # only the atoms that are actually modelled. Returns (flat_indices, kept) where
+    # ``kept`` are the mol atom indices retained (aligned with flat_indices).
+    kept = [i for i, name in enumerate(atom_names) if name in atom_name_to_flat_idx]
     missing = [name for name in atom_names if name not in atom_name_to_flat_idx]
     if missing:
-      raise ValueError(
-          f'Failed to map ligand atoms for chain {chain_id}. Missing atom names:'
-          f' {missing}'
+      print(
+          f'[rgi] chain {chain_id}: dropping {len(missing)} ligand atom(s) absent'
+          f' from the structure: {missing}',
+          flush=True,
       )
-    return np.array(
-        [atom_name_to_flat_idx[name] for name in atom_names], dtype=np.int32
+    flat = np.array(
+        [atom_name_to_flat_idx[atom_names[i]] for i in kept], dtype=np.int32
     )
+    return flat, kept
+
+  def _subset_mol(mol, kept: Sequence[int]):
+    """Return a copy of ``mol`` containing only the atoms in ``kept`` (preserving
+    elements, atom_name, chiral tags, bonds among kept atoms and the conformer)."""
+    rw = Chem.RWMol()
+    old2new = {}
+    for new_i, old_i in enumerate(kept):
+      a = mol.GetAtomWithIdx(int(old_i))
+      na = Chem.Atom(a.GetAtomicNum())
+      if a.HasProp('atom_name'):
+        na.SetProp('atom_name', a.GetProp('atom_name'))
+      na.SetChiralTag(a.GetChiralTag())
+      rw.AddAtom(na)
+      old2new[int(old_i)] = new_i
+    for b in mol.GetBonds():
+      i, j = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
+      if i in old2new and j in old2new:
+        rw.AddBond(old2new[i], old2new[j], b.GetBondType())
+    out = rw.GetMol()
+    if mol.GetNumConformers() > 0:
+      conf = mol.GetConformer()
+      newconf = Chem.Conformer(len(kept))
+      for new_i, old_i in enumerate(kept):
+        newconf.SetAtomPosition(new_i, conf.GetAtomPosition(int(old_i)))
+      out.AddConformer(newconf, assignId=True)
+    try:
+      Chem.SanitizeMol(out)
+    except Exception:  # geometry-only restraints don't need a clean valence model
+      pass
+    return out
 
   restraint_cfg = fold_input.restraints_config
   config = RestraintConfig.from_dict(restraint_cfg)
@@ -648,10 +685,13 @@ def build_restraints(
           )
         except rdkit_utils.MolFromMmcifError:
           continue
-        flat_indices = _build_ligand_flat_indices_by_name(
+        flat_indices, kept = _build_ligand_flat_indices_by_name(
             chain.id,
             [atom.GetProp('atom_name').strip() for atom in mol.GetAtoms()],
         )
+        # Restrain only atoms present in the structure (drop CCD-only atoms).
+        if 0 < len(kept) < mol.GetNumAtoms():
+          mol = _subset_mol(mol, kept)
       else:
         continue
 

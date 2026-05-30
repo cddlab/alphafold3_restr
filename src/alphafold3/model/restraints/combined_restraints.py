@@ -171,9 +171,13 @@ class CombinedRestraints:
     # JAX arrays used by the in-scan minimizer.
     self._jax_conformer: dict | None = None
     self._jax_distance: dict | None = None
+    # Pure-JAX minimizer from rgi_utils (replaces the slow pure_callback/scipy
+    # path). Built from the same local-indexed arrays as _build_jax_arrays.
+    self._rgi_minimizer = None
 
     if self.n_active > 0:
       self._build_jax_arrays()
+      self._build_rgi_minimizer()
 
   # ------------------------------------------------------------------
   # Construction
@@ -389,6 +393,93 @@ class CombinedRestraints:
     else:
       self._jax_distance = None
 
+  def _build_rgi_minimizer(self) -> None:
+    """Build a pure-JAX minimizer from rgi_utils using the local-indexed arrays.
+
+    The arrays produced by _build_jax_arrays are exactly a rgi_utils
+    RestraintSpec (local indices into active_sites + ref values). We repackage
+    them and build a fori_loop/value_and_grad minimizer that runs entirely
+    inside XLA (no jax.pure_callback, no scipy) — this is the fix for the slow
+    AF3 restraint path.
+    """
+    from rgi_utils.optim.jax_optim import make_minimizer
+    from rgi_utils.spec import (
+        AngleArrays,
+        BondArrays,
+        ChiralArrays,
+        DistanceArrays,
+        RestraintSpec,
+        VdwArrays,
+    )
+
+    jc = self._jax_conformer or {}
+    bond = angle = chiral = vdw = distance = None
+    if 'bond' in jc:
+      b = jc['bond']
+      idx = np.asarray(b['idx'])
+      bond = BondArrays(
+          idx=idx,
+          r0=np.asarray(b['r0']),
+          slack=np.asarray(b['slack']),
+          weight=np.asarray(b['weight']),
+          half=np.zeros(len(idx)),
+          mask=np.asarray(b['mask']),
+      )
+    if 'angle' in jc:
+      a = jc['angle']
+      angle = AngleArrays(
+          idx=np.asarray(a['idx']),
+          th0=np.asarray(a['th0']),
+          slack=np.asarray(a['slack']),
+          weight=np.asarray(a['weight']),
+          mask=np.asarray(a['mask']),
+      )
+    if 'chiral' in jc:
+      c = jc['chiral']
+      chiral = ChiralArrays(
+          idx=np.asarray(c['idx']),
+          vol0=np.asarray(c['vol0']),
+          slack=np.asarray(c['slack']),
+          weight=np.asarray(c['weight']),
+          mask=np.asarray(c['mask']),
+      )
+    if 'vdw' in jc:
+      v = jc['vdw']
+      vdw = VdwArrays(
+          idx=np.asarray(v['idx']),
+          r_min=np.asarray(v['r_min']),
+          weight=np.asarray(v['weight']),
+          mask=np.asarray(v['mask']),
+      )
+    jd = self._jax_distance
+    if jd is not None:
+      distance = DistanceArrays(
+          grp1_idx=np.asarray(jd['grp1_idx']),
+          grp2_idx=np.asarray(jd['grp2_idx']),
+          grp1_mask=np.asarray(jd['grp1_mask']),
+          grp2_mask=np.asarray(jd['grp2_mask']),
+          target1=np.asarray(jd['target1']),
+          target2=np.asarray(jd['target2']),
+          dist_type=np.asarray(jd['dist_type']),
+          mask=np.asarray(jd['mask']),
+      )
+
+    spec = RestraintSpec(
+        n_active=self.n_active,
+        active_sites=np.asarray(self.active_sites, dtype=np.int64),
+        bond=bond,
+        angle=angle,
+        chiral=chiral,
+        vdw=vdw,
+        distance=distance,
+    )
+    self._rgi_minimizer = make_minimizer(
+        spec,
+        max_iter=self.config.max_iter,
+        learning_rate=self.config.learning_rate,
+        start_sigma=self.config.start_sigma,
+    )
+
   # ------------------------------------------------------------------
   # In-scan minimization
   # ------------------------------------------------------------------
@@ -398,70 +489,19 @@ class CombinedRestraints:
       positions: jnp.ndarray,
       sigma_t: jnp.ndarray,
   ) -> jnp.ndarray:
-    """Apply one restraint-minimization step on active atoms."""
-    if not self.is_active():
+    """Apply one restraint-minimization step on active atoms.
+
+    Uses the pure-JAX rgi_utils minimizer: gradient descent (fori_loop +
+    value_and_grad) runs entirely inside XLA and is gated on the noise level, so
+    the whole step stays JIT-compiled inside hk.scan/hk.vmap. This replaces the
+    old jax.pure_callback + scipy (ScipyMinimize) path that was extremely slow.
+    """
+    if not self.is_active() or self._rgi_minimizer is None:
       return positions
-
-    out_spec = jax.ShapeDtypeStruct(positions.shape, positions.dtype)
-
-    def _cpu_callback(pos):
-      pos_np = np.asarray(pos)
-      refined = self.minimize_cpu(pos_np)
-      return refined.astype(pos_np.dtype, copy=False)
-
-    def _cpu_fallback(pos):
-      return jax.pure_callback(
-          _cpu_callback,
-          out_spec,
-          pos,
-          vmap_method='sequential',
-      )
-
-    if self.config.use_gpu:
-      n_active = self.n_active
-
-      def _gpu_callback(pos):
-        pos_np = np.asarray(pos)
-        pos_flat = pos_np.reshape(-1, 3)
-        active_pos = pos_flat[self.active_sites]
-        x0 = jnp.asarray(active_pos.reshape(-1))
-        energy_fn = functools.partial(
-            jax_energy.total_energy,
-            n_active=n_active,
-            conformer_data=self._jax_conformer,
-            distance_data=self._jax_distance,
-        )
-        x_opt = jax_energy.minimize_cg(x0, energy_fn, self.config.max_iter)
-        x_opt_np = np.asarray(x_opt).reshape(n_active, 3)
-        if not np.all(np.isfinite(x_opt_np)):
-          return self.minimize_cpu(pos_np).astype(pos_np.dtype, copy=False)
-        pos_flat_new = pos_flat.copy()
-        pos_flat_new[self.active_sites] = x_opt_np.astype(pos_flat.dtype, copy=False)
-        pos_out = pos_flat_new.reshape(pos_np.shape)
-        max_abs_coord = np.max(np.abs(pos_out))
-        max_abs_delta = np.max(np.abs(pos_out - pos_np))
-        if not np.all(np.isfinite(pos_out)) or max_abs_coord >= 1e4 or max_abs_delta >= 1e3:
-          return self.minimize_cpu(pos_np).astype(pos_np.dtype, copy=False)
-        return pos_out.astype(pos_np.dtype, copy=False)
-
-      def do_minimize(pos):
-        return jax.pure_callback(
-            _gpu_callback,
-            out_spec,
-            pos,
-            vmap_method='sequential',
-        )
-    else:
-      def do_minimize(pos):
-        return _cpu_fallback(pos)
-
-    # Gate on sigma_t: only minimize when noise level is low enough.
-    return jax.lax.cond(
-        sigma_t <= jnp.array(self.config.start_sigma, dtype=sigma_t.dtype),
-        do_minimize,
-        lambda pos: pos,
-        positions,
-    )
+    shape = positions.shape  # (num_tokens, max_atoms_per_token, 3)
+    flat = positions.reshape(-1, 3)
+    flat_opt = self._rgi_minimizer(flat, sigma_t)  # gate + fori_loop + scatter
+    return flat_opt.reshape(shape)
 
   # ------------------------------------------------------------------
   # CPU mode: called after the full diffusion loop
