@@ -478,6 +478,7 @@ class CombinedRestraints:
         max_iter=self.config.max_iter,
         learning_rate=self.config.learning_rate,
         start_sigma=self.config.start_sigma,
+        method=self.config.method,
     )
 
   # ------------------------------------------------------------------
