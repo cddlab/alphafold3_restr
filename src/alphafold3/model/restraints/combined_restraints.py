@@ -55,7 +55,8 @@ class RestraintConfig:
       Each spec: 'atom_selection1', 'atom_selection2', 'harmonic'/'flat-bottomed'/etc.
   """
   use_gpu: bool = False
-  start_sigma: float = 1.0
+  start_sigma: float = 1.0  # global default for every restraint
+  conf_start_sigma: float = 1.0  # one value for all conformer (ligand) restraints
   max_iter: int = 100
   learning_rate: float = 0.01
   method: str = 'CG'
@@ -79,14 +80,18 @@ class RestraintConfig:
         "distance_restraints_config": [...],
       }
     """
+    g = float(d.get('start_sigma', 1.0))
+    conf = d.get('conformer_restraints_config', {}) or {}
     return cls(
         use_gpu=d.get('gpu', False),
-        start_sigma=float(d.get('start_sigma', 1.0)),
+        start_sigma=g,
+        # one conformer start_sigma for all ligands (falls back to the global)
+        conf_start_sigma=float(conf.get('start_sigma', g)),
         max_iter=int(d.get('max_iter', 100)),
         learning_rate=float(d.get('learning_rate', 0.01)),
         method=d.get('method', 'CG'),
         verbose=bool(d.get('verbose', False)),
-        conformer_restraints_config=d.get('conformer_restraints_config', {}),
+        conformer_restraints_config=conf,
         distance_restraints_config=d.get('distance_restraints_config', []),
     )
 
@@ -105,6 +110,7 @@ class DistanceRestraintData:
   target2: float       # upper bound (only for flat-bottomed)
   global_sites1: list[int] = dataclasses.field(default_factory=list)
   global_sites2: list[int] = dataclasses.field(default_factory=list)
+  start_sigma: float | None = None  # per-restraint; None -> the global default
 
   @classmethod
   def from_dict(cls, d: dict) -> 'DistanceRestraintData':
@@ -132,6 +138,7 @@ class DistanceRestraintData:
         distance_type=dtype,
         target1=target1,
         target2=target2,
+        start_sigma=float(d['start_sigma']) if 'start_sigma' in d else None,
     )
 
   @property
@@ -453,6 +460,14 @@ class CombinedRestraints:
       )
     jd = self._jax_distance
     if jd is not None:
+      # per-restraint start_sigma (order matches self.distance_restraints)
+      dist_start_sigma = np.array(
+          [
+              dr.start_sigma if dr.start_sigma is not None else self.config.start_sigma
+              for dr in self.distance_restraints
+          ],
+          dtype=np.float64,
+      )
       distance = DistanceArrays(
           grp1_idx=np.asarray(jd['grp1_idx']),
           grp2_idx=np.asarray(jd['grp2_idx']),
@@ -462,6 +477,7 @@ class CombinedRestraints:
           target2=np.asarray(jd['target2']),
           dist_type=np.asarray(jd['dist_type']),
           mask=np.asarray(jd['mask']),
+          start_sigma=dist_start_sigma,
       )
 
     spec = RestraintSpec(
@@ -472,6 +488,7 @@ class CombinedRestraints:
         chiral=chiral,
         vdw=vdw,
         distance=distance,
+        conf_start_sigma=self.config.conf_start_sigma,
     )
     self._rgi_minimizer = make_minimizer(
         spec,
@@ -702,6 +719,7 @@ class CombinedRestraints:
       ref_mask: np.ndarray,
       chain_id_to_asym_int: dict[str, int],
       max_atoms_per_token: int,
+      default_start_sigma: float = -1.0,
   ) -> list[DistanceRestraintData]:
     """Resolve atom selection strings to global flat indices.
 
@@ -717,6 +735,8 @@ class CombinedRestraints:
     results = []
     for spec in distance_configs:
       dr = DistanceRestraintData.from_dict(spec)
+      if dr.start_sigma is None:  # per-restraint default = global start_sigma
+        dr.start_sigma = default_start_sigma
       sel1 = AtomSelector(dr.atom_selection1)
       sel2 = AtomSelector(dr.atom_selection2)
 

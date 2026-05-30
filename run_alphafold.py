@@ -768,6 +768,7 @@ def build_restraints(
         ref_mask=ref_mask,
         chain_id_to_asym_int=chain_id_to_asym_int,
         max_atoms_per_token=max_atoms_per_token,
+        default_start_sigma=config.start_sigma,
     )
 
   return CombinedRestraints.from_config(
