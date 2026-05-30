@@ -723,9 +723,19 @@ class CombinedRestraints:
       sites1, sites2 = [], []
       # Build chain letter for each token from asym_id int
       asym_int_to_chain = {v: k for k, v in chain_id_to_asym_int.items()}
+      # Per-chain 1-based residue/token ordinal (resets at each chain), so the
+      # same selection ("chain B and resid 5") means residue 5 of that chain in
+      # every framework, consistent with protenix's per-chain res_id and boltz —
+      # NOT a cumulative global token index.
+      _per_chain_resid = np.zeros(len(token_asym_ids), dtype=int)
+      _counts: dict[int, int] = {}
+      for _ti, _aint in enumerate(token_asym_ids):
+        _aint = int(_aint)
+        _counts[_aint] = _counts.get(_aint, 0) + 1
+        _per_chain_resid[_ti] = _counts[_aint]
       for token_idx, asym_int in enumerate(token_asym_ids):
         chain_letter = asym_int_to_chain.get(int(asym_int), '')
-        resid = token_idx + 1
+        resid = int(_per_chain_resid[token_idx])
         for within_token_idx in range(max_atoms_per_token):
           if not bool(ref_mask[token_idx, within_token_idx]):
             continue
