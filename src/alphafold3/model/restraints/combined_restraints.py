@@ -30,7 +30,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from alphafold3.model.restraints import jax_energy
 from alphafold3.model.restraints.selection import AtomSelector
 
 
