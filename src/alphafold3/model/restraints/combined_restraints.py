@@ -63,6 +63,17 @@ class AF3Restraints:
     flat_opt = self._minimizer(flat, sigma_t)
     return flat_opt.reshape(shape)
 
+  def finalize(self, positions, istep: int = 0) -> None:
+    """Log per-term restraint energy of a final structure (host-side, after the
+    scan; the in-scan minimizer cannot log). ``positions``: (num_tokens,
+    max_atoms_per_token, 3) or already-flat (-1, 3)."""
+    if self._minimizer is None:
+      return
+    import numpy as np
+
+    flat = np.asarray(positions).reshape(-1, 3)
+    self._rgi.finalize(flat, istep)
+
 
 def build_restraints(fold_input, example) -> 'AF3Restraints | None':
   """Build ``AF3Restraints`` from ``fold_input.restraints_config`` + a batch.

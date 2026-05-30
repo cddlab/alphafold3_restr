@@ -600,6 +600,18 @@ def predict_structure(
     rng_key = jax.random.PRNGKey(seed)
     result = model_runner.run_inference(example, rng_key, restraints=restraints)
 
+    # Log per-term restraint energy (bond/angle/chiral/vdw/distance) of the final
+    # structure — sample 0 of the first seed. Best-effort diagnostics only.
+    if (
+        restraints is not None
+        and restraints.is_active()
+        and seed == fold_input.rng_seeds[0]
+    ):
+      try:
+        restraints.finalize(result['diffusion_samples']['atom_positions'][0])
+      except Exception as exc:  # diagnostics must never break inference
+        print(f'restraint finalize stats failed: {exc}')
+
     print(
         f'Running model inference with seed {seed} took'
         f' {time.time() - inference_start_time:.2f} seconds.'
