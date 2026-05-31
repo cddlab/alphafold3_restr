@@ -842,21 +842,17 @@ def process_fold_input(
   if not fold_input.chains:
     raise ValueError('Fold input has no chains.')
 
-  if (
-      not force_output_dir
-      and os.path.exists(output_dir)
-      and os.listdir(output_dir)
-  ):
-    new_output_dir = (
-        f'{output_dir}_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}'
-    )
-    print(
-        f'Output will be written in {new_output_dir} since {output_dir} is'
-        ' non-empty.'
-    )
-    output_dir = new_output_dir
-  else:
-    print(f'Output will be written in {output_dir}')
+  # Retry by default: skip a job that is already complete (a finished job writes
+  # <job>_ranking_scores.csv), so a failed batch reruns only the missing jobs.
+  # Use --force_output_dir to recompute in place instead of skipping.
+  ranking_csv = os.path.join(
+      output_dir, f'{fold_input.sanitised_name()}_ranking_scores.csv'
+  )
+  if not force_output_dir and os.path.exists(ranking_csv):
+    print(f'Skipping {fold_input.name}: already complete in {output_dir}.')
+    return fold_input
+
+  print(f'Output will be written in {output_dir}')
 
   if data_pipeline_config is None:
     print('Skipping data pipeline...')
