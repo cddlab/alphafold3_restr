@@ -58,6 +58,19 @@ class AF3RestraintAdapter:
         c.id: i + 1 for i, c in enumerate(fold_input.chains)
     }
     self.asym_int_to_chain = {v: k for k, v in self.chain_id_to_asym_int.items()}
+    # The chain<->asym mapping assumes fold_input.chains order matches the batch
+    # asym_id assignment (both 1-based by appearance), which holds for standard
+    # inference (no cropping). Warn if the assumed asym ids aren't all present in
+    # the batch, so a misalignment is visible rather than silently restraining the
+    # wrong atoms (e.g. a chain dropped by structure cleaning).
+    batch_asyms = {int(a) for a in np.unique(self.token_asym_ids)}
+    if not set(self.asym_int_to_chain) <= batch_asyms:
+      logger.warning(
+          'chain<->asym mapping may be misaligned: fold_input asym ids %s are '
+          'not all present in the batch (batch asym ids: %s).',
+          sorted(set(self.asym_int_to_chain) - batch_asyms),
+          sorted(batch_asyms),
+      )
     self._ccd = None
 
   @property

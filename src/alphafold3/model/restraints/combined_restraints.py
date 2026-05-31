@@ -93,6 +93,16 @@ def build_restraints(fold_input, example) -> 'AF3Restraints | None':
   # AF3 runs the pure-JAX minimizer inside the diffusion scan.
   config = dict(fold_input.restraints_config)
   config.setdefault('backend', 'jax')
+  # The dynamic ligand-protein VdW is torch-only; under the jax backend an unset
+  # vdw.mode silently drops VdW (combined.py warns and applies nothing). Default
+  # it to the static intramolecular VdW, which works in every backend.
+  conf = config.get('conformer_restraints_config')
+  vdw = conf.get('vdw') if isinstance(conf, dict) else None
+  if isinstance(vdw, dict) and vdw.get('weight', 0) and 'mode' not in vdw:
+    config['conformer_restraints_config'] = {
+        **conf,
+        'vdw': {**vdw, 'mode': 'intramolecular'},
+    }
 
   adapter = AF3RestraintAdapter(fold_input, example)
   rgi = CombinedRestraints()
