@@ -1,0 +1,51 @@
+{
+  "dialect": "alphafold3",
+  "version": 4,
+  "name": "qbp_rgi_example",
+  "modelSeeds": [0],
+  "sequences": [
+    {
+      "protein": {
+        "id": "A",
+        "sequence": "ADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK",
+        "modifications": [],
+        "templates": [],
+        "unpairedMsa": ">qbp\nADKKLVVATDTAFVPFEFKQGDKYVGFDVDLWAAIAKELKLDYELKPMDFSGIIPALQTKNVDLALAGITITDERKKAIDFSDGYYKSGLLVMVKANNNDVKSVKDLDGKVVAVKSGTGSVDYAKANIKTKDLRQFPNIDNAYMELGTNRADAVLHDTPNILYFIKTAGNGQFKAVGDSLEAQQYGIAFPKGSDELRDKVNGALKTLRENGTYNEIYKKWFGTEPK\n",
+        "pairedMsa": ""
+      }
+    },
+    {
+      "ligand": {
+        "id": "B",
+        "ccdCodes": ["ATP"],
+        "conformer_restraints": true
+      }
+    }
+  ],
+  "restraints_config": {
+    "_comment": "rgi_utils restraint-guided inference (JAX backend). RUN (partition af3): python run_alphafold.py --run_data_pipeline=False --model_dir=/home/apps/alphafold3/models --json_path=restr_example.json --output_dir=../out_af3_example . MSA is inline (single-sequence) so this is self-contained. NOTE: AF3 rejects unknown JSON keys at the fold-input top level, so usage notes live here inside restraints_config (which AF3 passes through to rgi_utils; '_comment' keys are ignored by the parser). conformer vdw MUST be mode=intramolecular under JAX. AF3's minimizer converges near-target (~24-25 A); the combined distance+conformer uses max_iter=2000. start_sigma: a restraint is active when sigma<=start_sigma; settable globally (here), per distance entry, and once for all conformer terms.",
+    "verbose": true,
+    "gpu": true,
+    "max_iter": 2000,
+    "learning_rate": 0.05,
+    "method": "CG",
+    "start_sigma": 99999999,
+    "distance_restraints_config": [
+      {
+        "_comment": "COM distance pulled to target_distance. type: harmonic{target_distance} | flat-bottomed{target_distance1,target_distance2} | flat-bottomed1 | flat-bottomed2. resid = per-chain 1-based ordinal; qualify protein groups with 'chain A and (...)' so a bare resid range does not also match the ligand (chain B). start_sigma here overrides the global for this restraint.",
+        "atom_selection1": "chain A and ((resid 5 to 84) or (resid 186 to 224))",
+        "atom_selection2": "chain A and (resid 90 to 180)",
+        "start_sigma": 99999999,
+        "harmonic": { "target_distance": 25.0 }
+      }
+    ],
+    "conformer_restraints_config": {
+      "_comment": "Hold the ligand at its ideal RDKit geometry. start_sigma applies to ALL conformer terms (one value, all ligands); lower it to enforce ligand geometry only late in denoising. vdw mode=intramolecular is required for the JAX backend.",
+      "start_sigma": 99999999,
+      "bond": { "weight": 1.0 },
+      "angle": { "weight": 1.0 },
+      "chiral": { "weight": 1.0 },
+      "vdw": { "weight": 1.0, "mode": "intramolecular" }
+    }
+  }
+}
