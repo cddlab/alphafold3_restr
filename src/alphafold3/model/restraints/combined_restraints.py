@@ -90,9 +90,19 @@ def build_restraints(fold_input, example) -> 'AF3Restraints | None':
     return None
   from rgi_utils.combined import CombinedRestraints
 
-  # AF3 runs the pure-JAX minimizer inside the diffusion scan.
+  # AF3 runs the pure-JAX minimizer inside the diffusion scan, so it supports ONLY
+  # the jax backend. Force it (do not setdefault): an explicit backend:numpy/torch in
+  # the fold-input JSON would otherwise build an unused torch/numpy optimizer, leave
+  # get_minimizer()=None, and silently apply NO restraints (distance + conformer both
+  # vanish with no error). Warn if a different backend was requested.
   config = dict(fold_input.restraints_config)
-  config.setdefault('backend', 'jax')
+  if config.get('backend') not in (None, 'jax'):
+    logger.warning(
+        'AF3 supports only the jax backend; ignoring restraints_config '
+        'backend=%r and forcing jax.',
+        config['backend'],
+    )
+  config['backend'] = 'jax'
   # The dynamic ligand-protein VdW is torch-only; under the jax backend an unset
   # vdw.mode silently drops VdW (combined.py warns and applies nothing). Default
   # it to the static intramolecular VdW, which works in every backend.
