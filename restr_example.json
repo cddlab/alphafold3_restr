@@ -45,6 +45,7 @@
       "bond": { "weight": 1.0 },
       "angle": { "weight": 1.0 },
       "chiral": { "weight": 1.0 },
+      "dihedral": { "weight": 1.0 },
       "vdw": { "weight": 1.0, "mode": "intramolecular" }
     }
   }

@@ -131,6 +131,24 @@ class AF3RestraintAdapter:
       if mol is None or len(flat_indices) == 0:
         continue
       conf_crds = pos_flat[flat_indices]  # (n_atoms, 3) reference coords
+      # A SMILES mol carries no 3D geometry, so chiral tags exist only if the SMILES
+      # annotated them (@/@@); the featurizer keys chiral restraints on GetChiralTag.
+      # Attach the reference conformer and perceive stereo from it (matching the CCD
+      # path, which assigns stereo from the ideal conformer) so an unannotated SMILES
+      # stereocentre still gets chiral restraints. (MolFromSmiles keeps implicit-H on,
+      # so the chai SetNoImplicit dance is unnecessary here.)
+      if mol.GetNumConformers() == 0 and mol.GetNumAtoms() == len(conf_crds):
+        conf = Chem.Conformer(mol.GetNumAtoms())
+        for i in range(len(conf_crds)):
+          conf.SetAtomPosition(
+              i,
+              (float(conf_crds[i, 0]), float(conf_crds[i, 1]), float(conf_crds[i, 2])),
+          )
+        mol.AddConformer(conf, assignId=True)
+        try:
+          Chem.AssignStereochemistryFrom3D(mol)
+        except Exception:  # geometry-only restraints don't need a clean valence model
+          pass
       yield LigandConf(
           mol=mol,
           conf_coords=conf_crds,
