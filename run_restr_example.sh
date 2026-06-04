@@ -18,13 +18,18 @@ rm -rf out_restr_example   # else AF3 skip-existing early-returns on the prior o
 # restr_example.json has an inline single-sequence MSA (self-contained) and carries
 # `restraints_config` (backend forced to jax). RGI runs inside the diffusion hk.scan.
 # NOTE: conformer vdw MUST be mode=intramolecular under JAX.
-python run_alphafold.py \
+# Run to a log so the inference exit status is checked: a `| grep ... || true` pipe
+# (no pipefail) would otherwise swallow a crash and still report success.
+if ! python run_alphafold.py \
     --run_data_pipeline=False \
     --db_dir=/mnt/database/public_databases \
     --pdb_database_path=/home/apps/alphafold3/database/pdb_mmcif/mmcif_files \
     --model_dir=/home/apps/alphafold3/models \
     --json_path=restr_example.json \
     --output_dir=out_restr_example \
-    2>&1 | grep -iE "rgi_utils|built spec|restraint|Error|Traceback|finalize|dropping" || true
+    > run_restr_example.log 2>&1; then
+    echo "af3 inference FAILED:"; tail -n 40 run_restr_example.log; exit 1
+fi
+grep -iE "rgi_utils|built spec|restraint|finalize|dropping" run_restr_example.log || true
 # (COM check: run check_dist.py with a gemmi-enabled venv; AF3's venv lacks gemmi.)
 echo done

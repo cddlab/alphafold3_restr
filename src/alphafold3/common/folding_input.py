@@ -899,6 +899,10 @@ class Ligand:
       contents['smiles'] = self.smiles
     if self.description is not None:
       contents['description'] = self.description
+    # Round-trip the RGI per-ligand opt-out (default True); emit only when disabled
+    # so the emitted *_data.json reloads with the same setting (from_dict reads it).
+    if not self.conformer_restraints:
+      contents['conformer_restraints'] = False
     return {'ligand': contents}
 
 
@@ -1458,18 +1462,20 @@ class Input:
       chain = deduped_chains[chain_content_hash]
       sequences.append(chain.to_dict(seq_id=ids if len(ids) > 1 else ids[0]))
 
-    alphafold_json = json.dumps(
-        {
-            'dialect': JSON_DIALECT,
-            'version': JSON_VERSION,
-            'name': self.name,
-            'sequences': sequences,
-            'modelSeeds': self.rng_seeds,
-            'bondedAtomPairs': self.bonded_atom_pairs,
-            'userCCD': self.user_ccd,
-        },
-        indent=2,
-    )
+    json_obj = {
+        'dialect': JSON_DIALECT,
+        'version': JSON_VERSION,
+        'name': self.name,
+        'sequences': sequences,
+        'modelSeeds': self.rng_seeds,
+        'bondedAtomPairs': self.bonded_atom_pairs,
+        'userCCD': self.user_ccd,
+    }
+    # Round-trip the RGI restraints config (from_json reads this key) so the emitted
+    # *_data.json reloads with restraints intact instead of silently unrestrained.
+    if self.restraints_config is not None:
+      json_obj['restraints_config'] = self.restraints_config
+    alphafold_json = json.dumps(json_obj, indent=2)
     # Remove newlines from the query/template indices arrays. We match the
     # queryIndices/templatesIndices with a non-capturing group. We then match
     # the entire region between the square brackets by looking for lines

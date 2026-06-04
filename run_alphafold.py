@@ -438,16 +438,26 @@ class ModelRunner:
     The restraints object is captured by closure so its JAX arrays become
     constants in the compiled XLA program. A new function is compiled per
     unique restraints configuration.
+
+    Cached by restraints identity: restraints are seed-invariant (built once
+    before the seed loop in predict_structure), so without this every seed would
+    create a fresh jax.jit wrapper, miss the JIT cache, and recompile the entire
+    model — whereas the vanilla self._model (a cached_property) compiles once.
     """
+    cached = getattr(self, '_restraint_model_cache', None)
+    if cached is not None and cached[0] is restraints:
+      return cached[1]
     config = self._model_config
 
     @hk.transform
     def forward_fn(batch):
       return model.Model(config)(batch, restraints=restraints)
 
-    return functools.partial(
+    model_fn = functools.partial(
         jax.jit(forward_fn.apply, device=self._device), self.model_params
     )
+    self._restraint_model_cache = (restraints, model_fn)
+    return model_fn
 
   def run_inference(
       self,
