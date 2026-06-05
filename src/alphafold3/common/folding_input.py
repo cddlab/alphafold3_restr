@@ -863,7 +863,7 @@ class Ligand:
           f'got CCD: {json_dict["ccdCodes"]} and SMILES: {json_dict["smiles"]}'
       )
 
-    conformer_restraints = bool(json_dict.get('conformer_restraints', True))
+    conformer_restraints = bool(json_dict.get('conformer_restraints', False))
 
     if 'ccdCodes' in json_dict:
       ccd_codes = json_dict['ccdCodes']

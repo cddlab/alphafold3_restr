@@ -153,6 +153,9 @@ class AF3RestraintAdapter:
           mol=mol,
           conf_coords=conf_crds,
           global_indices=np.asarray(flat_indices, dtype=np.int64),
+          # opted-in: ligands that set conformer_restraints=False are skipped above
+          # (line ~128). Pass True explicitly because LigandConf defaults to False.
+          conformer_restraints=True,
       )
 
   # --- AF3-specific ligand mol construction ----------------------------------
