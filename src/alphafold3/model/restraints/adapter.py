@@ -112,7 +112,10 @@ class AF3RestraintAdapter:
         if not bool(self.ref_mask[token_idx, within]):
           continue
         flat = int(token_idx) * self.max_atoms_per_token + within
-        yield AtomRecord(chain=chain, resid=resid, index=flat)
+        name = _decode_atom_name_chars(
+            self.ref_atom_name_chars[token_idx, within]
+        ) or None
+        yield AtomRecord(chain=chain, resid=resid, index=flat, name=name)
 
   # --- ConformerAdapter ------------------------------------------------------
   def iter_ligand_confs(self) -> Iterator[LigandConf]:
