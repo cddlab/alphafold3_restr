@@ -610,6 +610,20 @@ def predict_structure(
     rng_key = jax.random.PRNGKey(seed)
     result = model_runner.run_inference(example, rng_key, restraints=restraints)
 
+    # Polish each diffusion sample at sigma=0 so the conformer restraint is realised on
+    # the RETURNED coords: the in-scan minimize tightens the denoised x0, but the Euler /
+    # step_scale extrapolation leaves the final sample off the conformer target. conformer
+    # terms adjust only internal geometry + VdW (no COM/pose term), so the pose is kept.
+    # Best-effort: a polish failure must never break inference.
+    if restraints is not None and restraints.is_active():
+      try:
+        ap = result['diffusion_samples']['atom_positions']
+        result['diffusion_samples']['atom_positions'] = np.stack(
+            [np.asarray(restraints.minimize(ap[i], 0.0)) for i in range(ap.shape[0])]
+        )
+      except Exception as exc:  # noqa: BLE001
+        print(f'restraint final polish failed: {exc}')
+
     # Log per-term restraint energy (bond/angle/chiral/vdw/distance) of the final
     # structure — sample 0 of the first seed. Best-effort diagnostics only.
     if (

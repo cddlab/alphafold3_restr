@@ -140,6 +140,12 @@ class AF3RestraintAdapter:
       # path, which assigns stereo from the ideal conformer) so an unannotated SMILES
       # stereocentre still gets chiral restraints. (MolFromSmiles keeps implicit-H on,
       # so the chai SetNoImplicit dance is unnecessary here.)
+      # NOTE: an ETKDG ideal-conformer target (like boltz/protenix) is NOT used here
+      # because af3's ligand atoms are in TOKEN order, which differs from the SMILES mol's
+      # RDKit-canonical order, and for SYMMETRIC ligands (e.g. fumarate/maleate) a
+      # connectivity-only substructure match can't pick the correct 1:1 atom mapping
+      # (it has several automorphisms). So af3 keeps ref_pos as the dihedral target =>
+      # cis/trans is only partially corrected on af3 (documented limitation).
       if mol.GetNumConformers() == 0 and mol.GetNumAtoms() == len(conf_crds):
         conf = Chem.Conformer(mol.GetNumAtoms())
         for i in range(len(conf_crds)):
