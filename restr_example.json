@@ -35,6 +35,7 @@
         "atom_selection2": "chain A and (resid 90 to 180)",
         "start_sigma": 99999999,
         "_stop_sigma": "optional lower bound, default -1 (off); release the restraint below this sigma (window stop<=sigma<=start). Rename '_stop_sigma' -> 'stop_sigma' to enable",
+        "_move": "optional, default 'both': which group the COM shift moves -- 'both' (minimal-displacement split) | 1 (only atom_selection1's group) | 2 (only atom_selection2's). 1/2 PIN the other group (e.g. move only a ligand toward a fixed pocket). Rename '_move' -> 'move' to enable",
         "harmonic": { "target_distance": 25.0 }
       }
     ],
