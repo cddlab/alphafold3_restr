@@ -103,16 +103,10 @@ def build_restraints(fold_input, example) -> 'AF3Restraints | None':
         config['backend'],
     )
   config['backend'] = 'jax'
-  # The dynamic ligand-protein VdW is torch-only; under the jax backend an unset
-  # vdw.mode silently drops VdW (combined.py warns and applies nothing). Default
-  # it to the static intramolecular VdW, which works in every backend.
-  conf = config.get('conformer_restraints_config')
-  vdw = conf.get('vdw') if isinstance(conf, dict) else None
-  if isinstance(vdw, dict) and vdw.get('weight', 0) and 'mode' not in vdw:
-    config['conformer_restraints_config'] = {
-        **conf,
-        'vdw': {**vdw, 'mode': 'intramolecular'},
-    }
+  # NOTE: the dynamic ligand-protein VdW now runs on jax too (rgi_utils jax_optim
+  # ports the torch term), so AF3 no longer overrides vdw.mode. An unset mode takes
+  # the rgi_utils default ("both" = intramolecular + ligand-protein), both of which
+  # work under the jax backend; set mode explicitly to pick one.
 
   adapter = AF3RestraintAdapter(fold_input, example)
   rgi = CombinedRestraints()

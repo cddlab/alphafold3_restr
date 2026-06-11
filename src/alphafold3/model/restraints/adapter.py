@@ -31,6 +31,7 @@ import numpy as np
 
 from alphafold3.common import folding_input
 from alphafold3.constants import chemical_components
+from alphafold3.constants import residue_names
 from alphafold3.data.tools import rdkit_utils
 from rgi_utils.atom_context import AtomRecord, LigandConf
 
@@ -53,6 +54,18 @@ class AF3RestraintAdapter:
     self.ref_atom_name_chars = np.asarray(example['ref_atom_name_chars'])
     self.ref_element = np.asarray(example['ref_element'])  # (num_tokens, max)
     self.max_atoms_per_token = self.ref_pos.shape[1]
+    # Per-token molecule-type masks -> normalized "protein"/"dna"/"rna" for the
+    # selection DSL (powers the protein/dna/rna selectors, e.g. in rmsd_restraints).
+    # AF3 always emits these in the BatchDict (features.py TokenFeatures.from_data_dict
+    # reads batch['is_protein'] etc. unconditionally), so index them directly: a
+    # missing key is a real batch-shape bug that should fail loudly here, not silently
+    # yield mol_type=None and make every protein/dna/rna selection match 0 atoms.
+    self.is_protein = np.asarray(example['is_protein']).astype(bool)  # (num_tokens,)
+    self.is_dna = np.asarray(example['is_dna']).astype(bool)
+    self.is_rna = np.asarray(example['is_rna']).astype(bool)
+    # per-token residue-type index into residue_names.POLYMER_TYPES -> 3-letter
+    # resname (powers AtomRecord.resname -> pairing="align" RMSD restraints).
+    self.aatype = np.asarray(example['aatype'])  # (num_tokens,)
     # chain.id -> asym int (1-based, in fold_input chain order)
     self.chain_id_to_asym_int = {
         c.id: i + 1 for i, c in enumerate(fold_input.chains)
@@ -80,6 +93,20 @@ class AF3RestraintAdapter:
     return self._ccd
 
   # --- FrameworkAdapter ------------------------------------------------------
+  def _token_mol_type(self, token_idx: int) -> str | None:
+    """Normalized molecule type of a token from AF3's per-token masks.
+
+    Returns "protein"/"dna"/"rna", or None for a ligand / water / unknown token, so
+    the protein/dna/rna selectors EXCLUDE it (cross-tool convention: None never
+    matches a molecule-type keyword)."""
+    if self.is_protein[token_idx]:
+      return 'protein'
+    if self.is_dna[token_idx]:
+      return 'dna'
+    if self.is_rna[token_idx]:
+      return 'rna'
+    return None
+
   def num_atoms(self) -> int:
     return int(self.ref_pos.shape[0] * self.max_atoms_per_token)
 
@@ -115,7 +142,20 @@ class AF3RestraintAdapter:
         name = _decode_atom_name_chars(
             self.ref_atom_name_chars[token_idx, within]
         ) or None
-        yield AtomRecord(chain=chain, resid=resid, index=flat, name=name)
+        at = int(self.aatype[token_idx])
+        resname = (
+            residue_names.POLYMER_TYPES[at]
+            if 0 <= at < len(residue_names.POLYMER_TYPES)
+            else None
+        )
+        yield AtomRecord(
+            chain=chain,
+            resid=resid,
+            index=flat,
+            name=name,
+            mol_type=self._token_mol_type(token_idx),
+            resname=resname,
+        )
 
   # --- ConformerAdapter ------------------------------------------------------
   def iter_ligand_confs(self) -> Iterator[LigandConf]:

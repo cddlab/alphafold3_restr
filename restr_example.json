@@ -17,7 +17,7 @@
     {
       "ligand": {
         "id": "B",
-        "ccdCodes": ["ATP"],
+        "ccdCodes": ["GLN"],
         "conformer_restraints": true
       }
     }
@@ -34,12 +34,14 @@
         "atom_selection1": "chain A and ((resid 5 to 84) or (resid 186 to 224))",
         "atom_selection2": "chain A and (resid 90 to 180)",
         "start_sigma": 99999999,
+        "_stop_sigma": "optional lower bound, default -1 (off); release the restraint below this sigma (window stop<=sigma<=start). Rename '_stop_sigma' -> 'stop_sigma' to enable",
         "harmonic": { "target_distance": 25.0 }
       }
     ],
     "conformer_restraints_config": {
-      "_comment": "Hold the ligand at its ideal RDKit geometry. start_sigma applies to ALL conformer terms (one value, all ligands); lower it to enforce ligand geometry only late in denoising. vdw mode=intramolecular is required for the JAX backend.",
+      "_comment": "Hold the GLN ligand at its ideal RDKit geometry (bond/angle/chiral; GLN has one stereocentre at CA). dihedral = cis/trans (E/Z) of an acyclic non-aromatic double bond: GLN has none (terminal C=O) so dihedrals=0 here, but all 7 tools detect them when present (e.g. fumarate/maleate). start_sigma applies to ALL conformer terms (one value, all ligands); lower it to enforce ligand geometry only late in denoising. vdw mode=intramolecular is required for the JAX backend.",
       "start_sigma": 99999999,
+      "_stop_sigma": "optional lower bound for ALL conformer terms, default -1 (off); release below this sigma. Rename '_stop_sigma' -> 'stop_sigma' to enable",
       "bond": { "weight": 1.0 },
       "angle": { "weight": 1.0 },
       "chiral": { "weight": 1.0 },
@@ -48,9 +50,20 @@
     },
     "rmsd_restraints_config": [
       {
-        "_comment": "RMSD restraint (the gpu flag stays INERT for AF3). Kabsch-superposed RMSD of a moving group toward target_rmsd vs a reference PDB. Generate ref_pdb first: a vanilla AF3 prediction of this sequence converted to PDB (gemmi make_pdb_string). Atoms pair by IDENTITY (chain, resid, atom-name), so the ref atom order need not match. atom_selection is OPTIONAL: omit it (as below) to fit + measure RMSD over the WHOLE structure best-effort (atoms missing from the ref are skipped); add atom_selection_ref/target (or _fit/_calc) e.g. 'chain A and (resid 90 to 180)' for a region. start_sigma/weight optional.",
+        "_comment": "RMSD restraint (the gpu flag stays INERT for AF3). Kabsch-superposed RMSD of a moving group toward target_rmsd vs a reference PDB. Generate ref_pdb first: a vanilla AF3 prediction of this sequence converted to PDB (gemmi make_pdb_string). Atoms pair by IDENTITY (chain, resid, atom-name), so the ref atom order need not match. ALL options are shown below; keys starting with '_' are IGNORED by the parser (JSON has no comments, so '_<name>' = a commented-out variable -- rename to '<name>' to enable it).",
         "ref_pdb": "rmsd_ref.pdb",
-        "target_rmsd": 0.0
+        "target_rmsd": 0.0,
+        "_weight": "optional float, default 1.0",
+        "_start_sigma": "optional, e.g. 99999999; omit -> active every step (1.0 = late only)",
+        "_stop_sigma": "optional LOWER bound, default -1 (off). RELEASE the restraint below this sigma (window stop<=sigma<=start) so the model re-idealises geometry it held distorted -- fixes a broken peptide bond at a restrained-residue / free unmodeled-tail boundary; 1.0 validated for this whole-structure target_rmsd=0 case",
+        "_pairing": "'identity' (default: pair by chain/resid/atom-name) | 'align' (HOMOLOG ref: BLOSUM62 sequence-align, tolerates substitutions/indels/renumbering). NOTE align pairs backbone + ANY shared side-chain atom names by default, pinning a substituted residue's side chain onto the ref's coords; add a 'name CA' atom_selection to superpose backbone only",
+        "_best_effort": "true (default: skip atoms unmatched in the ref) | false (strict: raise on any unmatched atom)",
+        "_atom_selection_ref": "optional; omit -> WHOLE structure. Shorthand ref side (sets BOTH fit & calc), e.g. 'chain A and (resid 90 to 180)'",
+        "_atom_selection_target": "shorthand target side, e.g. 'chain A and (resid 90 to 180)'",
+        "_atom_selection_ref_fit": "OR split: atoms superposed (ref), e.g. 'chain A and (resid 5 to 220)'",
+        "_atom_selection_target_fit": "atoms superposed (target)",
+        "_atom_selection_ref_calc": "atoms measured (ref), e.g. 'chain A and (resid 90 to 180)'",
+        "_atom_selection_target_calc": "atoms measured (target)"
       }
     ]
   }
