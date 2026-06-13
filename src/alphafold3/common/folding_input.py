@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -112,7 +121,9 @@ class Template:
   def __hash__(self) -> int:
     return hash((self._mmcif, tuple(sorted(self._query_to_template))))
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, Template):
+      return NotImplemented
     mmcifs_equal = self._mmcif == other._mmcif
     maps_equal = sorted(self._query_to_template) == sorted(
         other._query_to_template
@@ -221,7 +232,9 @@ class ProteinChain:
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, ProteinChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
@@ -520,7 +533,9 @@ class RnaChain:
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, RnaChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence
@@ -642,6 +657,7 @@ class RnaChain:
         id=self.id,
         sequence=self.sequence,
         modifications=self.modifications,
+        description=self.description,
         unpaired_msa=self._unpaired_msa or '',
     )
 
@@ -705,7 +721,9 @@ class DnaChain:
   def __len__(self) -> int:
     return len(self._sequence)
 
-  def __eq__(self, other: Self) -> bool:
+  def __eq__(self, other: object) -> bool:
+    if not isinstance(other, DnaChain):
+      return NotImplemented
     return (
         self._id == other._id
         and self._sequence == other._sequence

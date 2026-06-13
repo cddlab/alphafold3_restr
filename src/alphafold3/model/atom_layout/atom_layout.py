@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -27,7 +36,6 @@ from alphafold3.structure import chemical_components as struc_chem_comps
 import jax.numpy as jnp
 import numpy as np
 from rdkit import Chem
-
 
 xnp_ndarray: TypeAlias = np.ndarray | jnp.ndarray  # pylint: disable=invalid-name
 NumpyIndex: TypeAlias = Any
@@ -641,6 +649,7 @@ def get_link_drop_atoms(
     is_end_terminus: bool,
     bonded_atoms: set[str],
     drop_ligand_leaving_atoms: bool = False,
+    fix_standalone_glycans: bool = False,
 ) -> set[str]:
   """Returns set of atoms that are dropped when this res_name gets linked.
 
@@ -651,6 +660,12 @@ def get_link_drop_atoms(
     is_end_terminus: whether the residue is the c-terminus
     bonded_atoms: Names of atoms coming off this residue.
     drop_ligand_leaving_atoms: Flag to switch on/off leaving atoms for ligands.
+    fix_standalone_glycans: AlphaFold 3 model training and evaluation filtered
+      out leaving atoms from glycan ligands even if they were not bonded to
+      anything ("standalone" glycans). Setting this flag to True fixes this
+      undesirable behavior, but moves away from the regime where AlphaFold 3 was
+      trained and evaluated. This has only an effect if
+      drop_ligand_leaving_atoms is True.
 
   Returns:
     Set of atoms that are dropped when this amino acid gets linked.
@@ -677,8 +692,12 @@ def get_link_drop_atoms(
         *chemical_component_sets.GLYCAN_OTHER_LIGANDS,
         *chemical_component_sets.GLYCAN_LINKING_LIGANDS,
     }:
-      if 'O1' not in bonded_atoms:
-        drop_atoms.update({'O1'})
+      if fix_standalone_glycans:
+        if bonded_atoms and 'O1' not in bonded_atoms:
+          drop_atoms.update({'O1'})
+      else:
+        if 'O1' not in bonded_atoms:
+          drop_atoms.update({'O1'})
   return drop_atoms
 
 
@@ -743,6 +762,7 @@ def make_flat_atom_layout(
     with_hydrogens: bool = False,
     skip_unk_residues: bool = True,
     drop_ligand_leaving_atoms: bool = False,
+    fix_standalone_glycans: bool = False,
 ) -> AtomLayout:
   """Make a flat atom layout for given residues.
 
@@ -761,6 +781,12 @@ def make_flat_atom_layout(
       compatible with the rest of AlphaFold that does not predict atoms for
       unknown residues
     drop_ligand_leaving_atoms: Flag to switch on/ off leaving atoms for ligands.
+    fix_standalone_glycans: AlphaFold 3 model training and evaluation filtered
+      out leaving atoms from glycan ligands even if they were not bonded to
+      anything ("standalone" glycans). Setting this flag to True fixes this
+      undesirable behavior, but moves away from the regime where AlphaFold 3 was
+      trained and evaluated. This has only an effect if
+      drop_ligand_leaving_atoms is True.
 
   Returns:
     an `AtomLayout` object
@@ -834,6 +860,7 @@ def make_flat_atom_layout(
         is_end_terminus=residues.is_end_terminus[idx],
         bonded_atoms=bonded_atoms,
         drop_ligand_leaving_atoms=drop_ligand_leaving_atoms,
+        fix_standalone_glycans=fix_standalone_glycans,
     )
 
     # If deprotonation info is available, remove the specific atoms.
