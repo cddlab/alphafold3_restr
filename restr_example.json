@@ -39,6 +39,25 @@
         "harmonic": { "target_distance": 25.0 }
       }
     ],
+    "_angle_restraints_config": [
+      {
+        "_comment": "OPTIONAL group-COM angle restraint — rename '_angle_restraints_config' -> 'angle_restraints_config' to enable. Angle (DEGREES) of the COMs of THREE atom groups, vertex = group 2. Restraint types + 'move' mirror the distance restraint: harmonic{target_angle} | flat-bottomed{target_angle1,target_angle2} | flat-bottomed1{target_angle1} | flat-bottomed2{target_angle2}; move DEFAULT frees the arms (groups 1,3) and pins the vertex (group 2) — override with 'all' | an index | a list like [1,3]. weight/start_sigma/stop_sigma optional. CG-solved on the JAX backend (verified).",
+        "atom_selection1": "chain A and (resid 5 to 84)",
+        "atom_selection2": "chain A and (resid 90 to 180)",
+        "atom_selection3": "chain A and (resid 186 to 224)",
+        "harmonic": { "target_angle": 90.0 }
+      }
+    ],
+    "_dihedral_restraints_config": [
+      {
+        "_comment": "OPTIONAL group-COM dihedral restraint — rename '_dihedral_restraints_config' -> 'dihedral_restraints_config' to enable. Dihedral (DEGREES) of FOUR group COMs, axis = group2-group3. Types: harmonic{target_dihedral} (periodicity-safe, wrapped to +-180) | flat-bottomed{target_dihedral1,target_dihedral2} (cannot straddle +-180) | flat-bottomed1 | flat-bottomed2; move DEFAULT frees the ends (groups 1,4) and pins the axis (groups 2,3) — override with 'all' | an index | a list like [1,4]. weight/start_sigma/stop_sigma optional.",
+        "atom_selection1": "chain A and (resid 5 to 50)",
+        "atom_selection2": "chain A and (resid 51 to 100)",
+        "atom_selection3": "chain A and (resid 101 to 150)",
+        "atom_selection4": "chain A and (resid 151 to 224)",
+        "harmonic": { "target_dihedral": 180.0 }
+      }
+    ],
     "conformer_restraints_config": {
       "_comment": "Hold the GLN ligand at its ideal RDKit geometry (bond/angle/chiral; GLN has one stereocentre at CA). dihedral = cis/trans (E/Z) of an acyclic non-aromatic double bond: GLN has none (terminal C=O) so dihedrals=0 here, but all 7 tools detect them when present (e.g. fumarate/maleate). start_sigma applies to ALL conformer terms (one value, all ligands); lower it to enforce ligand geometry only late in denoising. vdw mode=intramolecular is required for the JAX backend.",
       "start_sigma": 99999999,

@@ -805,10 +805,10 @@ class Ligand:
   ccd_ids: Sequence[str] | None = None
   smiles: str | None = None
   description: str | None = None
-  # Default on: a ligand applies conformer restraints unless it explicitly opts
-  # out with conformer_restraints:false (per-ligand flag contract shared with
-  # boltz/protenix).
-  conformer_restraints: bool = True
+  # Opt-in: a ligand applies conformer restraints only when it explicitly sets
+  # conformer_restraints:true (the per-ligand flag contract shared with
+  # boltz/protenix; absent flag -> no conformer restraints for that ligand).
+  conformer_restraints: bool = False
 
   def __post_init__(self):
     if (self.ccd_ids is None) == (self.smiles is None):
@@ -899,10 +899,10 @@ class Ligand:
       contents['smiles'] = self.smiles
     if self.description is not None:
       contents['description'] = self.description
-    # Round-trip the RGI per-ligand opt-out (default True); emit only when disabled
+    # Round-trip the RGI per-ligand opt-in (default False); emit only when enabled
     # so the emitted *_data.json reloads with the same setting (from_dict reads it).
-    if not self.conformer_restraints:
-      contents['conformer_restraints'] = False
+    if self.conformer_restraints:
+      contents['conformer_restraints'] = True
     return {'ligand': contents}
 
 
