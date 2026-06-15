@@ -1,3 +1,8 @@
+see [rgi_utils](https://github.com/cddlab/rgi_utils) for more information.
+
+<details>
+<summary>Original README</summary>
+
 ![header](docs/header.jpg)
 
 # AlphaFold 3
@@ -256,3 +261,5 @@ available with reference to the following:
     See the Supplementary Information of the
     [AlphaFold 3 paper](https://nature.com/articles/s41586-024-07487-w) for
     details.
+
+</details>
