@@ -1,7 +1,16 @@
 // Copyright 2024 DeepMind Technologies Limited
 //
-// AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-// this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+// AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+// (the "License"); you may not use this file except in compliance with the
+// License. You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 //
 // To request access to the AlphaFold 3 model parameters, follow the process set
 // out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -384,13 +393,17 @@ absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
   cif["data_"].emplace_back(first_token);
 
   // Counters for CIF loop_ regions.
-  int loop_token_index = 0;
   int num_loop_keys = 0;
   // Loops have usually O(10) columns but could have up to O(10^6) rows. It is
   // therefore wasteful to look up the cif vector where to add a loop value
   // since that means doing `columns * rows` map lookups. If we save pointers to
   // these loop column fields instead, we need only 1 cif lookup per column.
   std::vector<std::vector<std::string>*> loop_column_values;
+  // Use a resetting column index instead of computing modulo on every token.
+  // This is the hot path for _atom_site tables with millions of values.
+  int token_column_index = 0;
+  // Total number of loop values seen (for column size validation).
+  int loop_token_count = 0;
 
   // Skip the first element since we already processed it above.
   for (auto token_itr = tokens->begin() + 1; token_itr != tokens->end();
@@ -399,23 +412,22 @@ absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
     if (absl::EqualsIgnoreCase(token, "loop_")) {
       // A new loop started, check the previous loop and get rid of its data.
       absl::Status loop_status =
-          CheckLoopColumnSizes(num_loop_keys, loop_token_index);
+          CheckLoopColumnSizes(num_loop_keys, loop_token_count);
       if (!loop_status.ok()) {
         return loop_status;
       }
       loop_flag = true;
       loop_column_values.clear();
-      loop_token_index = 0;
+      token_column_index = 0;
+      loop_token_count = 0;
       num_loop_keys = 0;
       continue;
     } else if (loop_flag) {
       // The second condition checks we are in the first column. Some mmCIF
       // files (e.g. 4q9r) have values in later columns starting with an
       // underscore and we don't want to read these as keys.
-      int token_column_index =
-          num_loop_keys == 0 ? 0 : loop_token_index % num_loop_keys;
       if (token_column_index == 0 && !token.empty() && token[0] == '_') {
-        if (loop_token_index > 0) {
+        if (loop_token_count > 0) {
           // We are out of the loop.
           loop_flag = false;
         } else {
@@ -449,7 +461,11 @@ absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
                            " expected at most: ", loop_column_values.size()));
         }
         loop_column_values[token_column_index]->emplace_back(token);
-        loop_token_index++;
+        loop_token_count++;
+        if (++token_column_index == num_loop_keys) {
+          // We have completed a row, reset the column index for the next row.
+          token_column_index = 0;
+        }
         continue;
       }
     }
@@ -470,7 +486,7 @@ absl::StatusOr<CifDict> CifDict::FromString(absl::string_view cif_string) {
     }
   }
   absl::Status loop_status =
-      CheckLoopColumnSizes(num_loop_keys, loop_token_index);
+      CheckLoopColumnSizes(num_loop_keys, loop_token_count);
   if (!loop_status.ok()) {
     return loop_status;
   }

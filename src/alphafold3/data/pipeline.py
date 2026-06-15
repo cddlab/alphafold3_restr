@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -155,9 +164,9 @@ def _get_protein_msa_and_templates(
 @functools.cache
 def _get_rna_msa(
     sequence: str,
-    nt_rna_msa_config: msa_config.NhmmerConfig,
-    rfam_msa_config: msa_config.NhmmerConfig,
-    rnacentral_msa_config: msa_config.NhmmerConfig,
+    nt_rna_msa_config: msa_config.RunConfig,
+    rfam_msa_config: msa_config.RunConfig,
+    rnacentral_msa_config: msa_config.RunConfig,
 ) -> msa.Msa:
   """Processes a single RNA chain."""
   logging.info('Getting RNA MSAs for sequence %s', sequence)
@@ -271,11 +280,11 @@ class DataPipelineConfig:
   uniref90_z_value: int | None = None
   # Nhmmer databases.
   ntrna_database_path: str
-  ntrna_z_value: int | None = None
+  ntrna_z_value: float | None = None
   rfam_database_path: str
-  rfam_z_value: int | None = None
+  rfam_z_value: float | None = None
   rna_central_database_path: str
-  rna_central_z_value: int | None = None
+  rna_central_z_value: float | None = None
   # Template search databases.
   seqres_database_path: str
   pdb_database_path: str
@@ -538,6 +547,7 @@ class DataPipeline:
         id=chain.id,
         sequence=chain.sequence,
         ptms=chain.ptms,
+        description=chain.description,
         unpaired_msa=unpaired_msa,
         paired_msa=paired_msa,
         templates=templates,
@@ -570,6 +580,7 @@ class DataPipeline:
         id=chain.id,
         sequence=chain.sequence,
         modifications=chain.modifications,
+        description=chain.description,
         unpaired_msa=unpaired_msa,
     )
 

@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -50,6 +59,7 @@ class _UnsetSentinel(enum.Enum):
   UNSET = object()
 
 
+_UnsetType = Literal[_UnsetSentinel.UNSET]
 _UNSET = _UnsetSentinel.UNSET
 
 
@@ -793,7 +803,7 @@ class Structure(table.Database):
       yield row | current_chain
 
   def _iter_atom_ranges(
-      self, boundaries: Sequence[int]
+      self, boundaries: Sequence[int] | np.ndarray
   ) -> Iterator[tuple[int, int]]:
     """Iterator for (start, end) pairs from an array of start indices."""
     yield from itertools.pairwise(boundaries)
@@ -803,7 +813,7 @@ class Structure(table.Database):
 
   def _iter_residue_ranges(
       self,
-      boundaries: Sequence[int],
+      boundaries: Sequence[int] | np.ndarray,
       *,
       count_unresolved: bool,
   ) -> Iterator[tuple[int, int]]:
@@ -1131,20 +1141,20 @@ class Structure(table.Database):
   def copy_and_update(
       self,
       *,
-      name: str | Literal[_UNSET] = _UNSET,
-      release_date: datetime.date | None | Literal[_UNSET] = _UNSET,
-      resolution: float | None | Literal[_UNSET] = _UNSET,
-      structure_method: str | None | Literal[_UNSET] = _UNSET,
+      name: str | _UnsetType = _UNSET,
+      release_date: datetime.date | None | _UnsetType = _UNSET,
+      resolution: float | None | _UnsetType = _UNSET,
+      structure_method: str | None | _UnsetType = _UNSET,
       bioassembly_data: (
-          bioassemblies.BioassemblyData | None | Literal[_UNSET]
+          bioassemblies.BioassemblyData | None | _UnsetType
       ) = _UNSET,
       chemical_components_data: (
-          struc_chem_comps.ChemicalComponentsData | None | Literal[_UNSET]
+          struc_chem_comps.ChemicalComponentsData | None | _UnsetType
       ) = _UNSET,
-      chains: structure_tables.Chains | None | Literal[_UNSET] = _UNSET,
-      residues: structure_tables.Residues | None | Literal[_UNSET] = _UNSET,
-      atoms: structure_tables.Atoms | None | Literal[_UNSET] = _UNSET,
-      bonds: structure_tables.Bonds | None | Literal[_UNSET] = _UNSET,
+      chains: structure_tables.Chains | None | _UnsetType = _UNSET,
+      residues: structure_tables.Residues | None | _UnsetType = _UNSET,
+      atoms: structure_tables.Atoms | None | _UnsetType = _UNSET,
+      bonds: structure_tables.Bonds | None | _UnsetType = _UNSET,
       skip_validation: bool = False,
   ) -> Self:
     """Performs a shallow copy but with specified fields updated."""
@@ -1322,15 +1332,15 @@ class Structure(table.Database):
   def copy_and_update_globals(
       self,
       *,
-      name: str | Literal[_UNSET] = _UNSET,
-      release_date: datetime.date | Literal[_UNSET] | None = _UNSET,
-      resolution: float | Literal[_UNSET] | None = _UNSET,
-      structure_method: str | Literal[_UNSET] | None = _UNSET,
+      name: str | _UnsetType = _UNSET,
+      release_date: datetime.date | _UnsetType | None = _UNSET,
+      resolution: float | _UnsetType | None = _UNSET,
+      structure_method: str | _UnsetType | None = _UNSET,
       bioassembly_data: (
-          bioassemblies.BioassemblyData | Literal[_UNSET] | None
+          bioassemblies.BioassemblyData | _UnsetType | None
       ) = _UNSET,
       chemical_components_data: (
-          struc_chem_comps.ChemicalComponentsData | Literal[_UNSET] | None
+          struc_chem_comps.ChemicalComponentsData | _UnsetType | None
       ) = _UNSET,
   ) -> Self:
     """Returns a shallow copy with the global columns updated."""

@@ -1,7 +1,16 @@
 # Copyright 2024 DeepMind Technologies Limited
 #
-# AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-# this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+# AlphaFold 3 source code is licensed under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with the
+# License. You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # To request access to the AlphaFold 3 model parameters, follow the process set
 # out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -10,8 +19,8 @@
 
 """AlphaFold 3 structure prediction script.
 
-AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
-this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
+AlphaFold 3 source code is licensed under Apache License, Version 2.0. To view a
+copy of this license, visit http://www.apache.org/licenses/LICENSE-2.0
 
 To request access to the AlphaFold 3 model parameters, follow the process set
 out at https://github.com/google-deepmind/alphafold3. You may only use these
@@ -55,8 +64,7 @@ from jax import numpy as jnp
 import numpy as np
 import tokamax
 
-
-_HOME_DIR = pathlib.Path(os.environ.get('HOME'))
+_HOME_DIR = pathlib.Path.home()
 _DEFAULT_MODEL_DIR = _HOME_DIR / 'models'
 _DEFAULT_DB_DIR = _HOME_DIR / 'public_databases'
 
@@ -129,7 +137,6 @@ DB_DIR = flags.DEFINE_multi_string(
     'Path to the directory containing the databases. Can be specified multiple'
     ' times to search multiple directories in order.',
 )
-
 _SMALL_BFD_DATABASE_PATH = flags.DEFINE_string(
     'small_bfd_database_path',
     '${DB_DIR}/bfd-first_non_consensus_sequences.fasta',
@@ -286,6 +293,14 @@ _CONFORMER_MAX_ITERATIONS = flags.DEFINE_integer(
     'Optional override for maximum number of iterations to run for RDKit '
     'conformer search.',
     lower_bound=0,
+)
+_FIX_STANDALONE_GLYCANS = flags.DEFINE_bool(
+    'fix_standalone_glycans',
+    False,
+    'AlphaFold 3 model training and evaluation filtered out leaving atoms from'
+    ' glycan ligands even if they were not bonded to anything ("standalone"'
+    ' glycans). Setting this flag to True fixes this undesirable behavior, but'
+    ' moves away from the regime where AlphaFold 3 was trained and evaluated.',
 )
 
 # JAX inference performance tuning.
@@ -562,10 +577,12 @@ class ResultsForSeed:
 def predict_structure(
     fold_input: folding_input.Input,
     model_runner: ModelRunner,
+    *,
     buckets: Sequence[int] | None = None,
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
 ) -> Sequence[ResultsForSeed]:
   """Runs the full inference pipeline to predict structures for each seed."""
 
@@ -580,6 +597,7 @@ def predict_structure(
       ref_max_modified_date=ref_max_modified_date,
       conformer_max_iterations=conformer_max_iterations,
       resolve_msa_overlaps=resolve_msa_overlaps,
+      fix_standalone_glycans=fix_standalone_glycans,
   )
   print(
       f'Featurising data with {len(fold_input.rng_seeds)} seed(s) took'
@@ -778,6 +796,7 @@ def process_fold_input(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
 ) -> folding_input.Input:
@@ -795,6 +814,7 @@ def process_fold_input(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
 ) -> Sequence[ResultsForSeed]:
@@ -811,6 +831,7 @@ def process_fold_input(
     ref_max_modified_date: datetime.date | None = None,
     conformer_max_iterations: int | None = None,
     resolve_msa_overlaps: bool = True,
+    fix_standalone_glycans: bool = False,
     force_output_dir: bool = False,
     compress_large_output_files: bool = False,
 ) -> folding_input.Input | Sequence[ResultsForSeed]:
@@ -839,6 +860,11 @@ def process_fold_input(
       paper. Set this to false if providing custom paired MSA using the unpaired
       MSA field to keep it exactly as is as deduplication against the paired MSA
       could break the manually crafted pairing between MSA sequences.
+    fix_standalone_glycans: If True, standalone glycans are preserved when
+      filter_leaving_atoms is True. This is False by default to match the
+      AlphaFold 3 paper. Note that the model has been trained with the default
+      setting, so setting this to True may cause non-standard behaviour of the
+      model.
     force_output_dir: If True, do not create a new output directory even if the
       existing one is non-empty. Instead use the existing output directory and
       potentially overwrite existing files. If False, create a new timestamped
@@ -891,6 +917,7 @@ def process_fold_input(
         ref_max_modified_date=ref_max_modified_date,
         conformer_max_iterations=conformer_max_iterations,
         resolve_msa_overlaps=resolve_msa_overlaps,
+        fix_standalone_glycans=fix_standalone_glycans,
     )
     print(f'Writing outputs with {len(fold_input.rng_seeds)} seed(s)...')
     write_outputs(
@@ -934,6 +961,9 @@ def main(_):
     raise AssertionError(
         'Exactly one of --json_path or --input_dir must be specified.'
     )
+
+  if _OUTPUT_DIR.value is None:
+    raise ValueError('Output directory must be specified with --output_dir.')
 
   # Make sure we can create the output directory before running anything.
   try:
@@ -1061,6 +1091,7 @@ def main(_):
         ref_max_modified_date=max_template_date,
         conformer_max_iterations=_CONFORMER_MAX_ITERATIONS.value,
         resolve_msa_overlaps=_RESOLVE_MSA_OVERLAPS.value,
+        fix_standalone_glycans=_FIX_STANDALONE_GLYCANS.value,
         force_output_dir=_FORCE_OUTPUT_DIR.value,
         compress_large_output_files=_COMPRESS_LARGE_OUTPUT_FILES.value,
     )
