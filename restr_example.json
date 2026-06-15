@@ -30,18 +30,18 @@
     "method": "CG",
     "distance_restraints_config": [
       {
-        "_comment": "COM distance pulled to target_distance. type: harmonic{target_distance} | flat-bottomed{target_distance1,target_distance2} | flat-bottomed1 | flat-bottomed2. resid = per-chain 1-based ordinal; qualify protein groups with 'chain A and (...)' so a bare resid range does not also match the ligand (chain B). start_sigma is optional on each distance entry (omit -> every step).",
+        "_comment": "centroid distance pulled to target_distance. type: harmonic{target_distance} | flat-bottomed{target_distance1,target_distance2} | flat-bottomed1 | flat-bottomed2. resid = per-chain 1-based ordinal; qualify protein groups with 'chain A and (...)' so a bare resid range does not also match the ligand (chain B). start_sigma is optional on each distance entry (omit -> every step).",
         "atom_selection1": "chain A and ((resid 5 to 84) or (resid 186 to 224))",
         "atom_selection2": "chain A and (resid 90 to 180)",
         "start_sigma": 99999999,
         "_stop_sigma": "optional lower bound, default -1 (off); release the restraint below this sigma (window stop<=sigma<=start). Rename '_stop_sigma' -> 'stop_sigma' to enable",
-        "_move": "optional, default 'both': which group the COM shift moves -- 'both' (minimal-displacement split) | 1 (only atom_selection1's group) | 2 (only atom_selection2's). 1/2 PIN the other group (e.g. move only a ligand toward a fixed pocket). Rename '_move' -> 'move' to enable",
+        "_move": "optional, default 'both': which group the centroid shift moves -- 'both' (minimal-displacement split) | 1 (only atom_selection1's group) | 2 (only atom_selection2's). 1/2 PIN the other group (e.g. move only a ligand toward a fixed pocket). Rename '_move' -> 'move' to enable",
         "harmonic": { "target_distance": 25.0 }
       }
     ],
     "_angle_restraints_config": [
       {
-        "_comment": "OPTIONAL group-COM angle restraint — rename '_angle_restraints_config' -> 'angle_restraints_config' to enable. Angle (DEGREES) of the COMs of THREE atom groups, vertex = group 2. Restraint types + 'move' mirror the distance restraint: harmonic{target_angle} | flat-bottomed{target_angle1,target_angle2} | flat-bottomed1{target_angle1} | flat-bottomed2{target_angle2}; move DEFAULT frees the arms (groups 1,3) and pins the vertex (group 2) — override with 'all' | an index | a list like [1,3]. weight/start_sigma/stop_sigma optional. CG-solved on the JAX backend (verified).",
+        "_comment": "OPTIONAL group-centroid angle restraint — rename '_angle_restraints_config' -> 'angle_restraints_config' to enable. Angle (DEGREES) of the centroids of THREE atom groups, vertex = group 2. Restraint types + 'move' mirror the distance restraint: harmonic{target_angle} | flat-bottomed{target_angle1,target_angle2} | flat-bottomed1{target_angle1} | flat-bottomed2{target_angle2}; move DEFAULT frees the arms (groups 1,3) and pins the vertex (group 2) — override with 'all' | an index | a list like [1,3]. weight/start_sigma/stop_sigma optional. CG-solved on the JAX backend (verified).",
         "atom_selection1": "chain A and (resid 5 to 84)",
         "atom_selection2": "chain A and (resid 90 to 180)",
         "atom_selection3": "chain A and (resid 186 to 224)",
@@ -50,7 +50,7 @@
     ],
     "_dihedral_restraints_config": [
       {
-        "_comment": "OPTIONAL group-COM dihedral restraint — rename '_dihedral_restraints_config' -> 'dihedral_restraints_config' to enable. Dihedral (DEGREES) of FOUR group COMs, axis = group2-group3. Types: harmonic{target_dihedral} (periodicity-safe, wrapped to +-180) | flat-bottomed{target_dihedral1,target_dihedral2} (cannot straddle +-180) | flat-bottomed1 | flat-bottomed2; move DEFAULT frees the ends (groups 1,4) and pins the axis (groups 2,3) — override with 'all' | an index | a list like [1,4]. weight/start_sigma/stop_sigma optional.",
+        "_comment": "OPTIONAL group-centroid dihedral restraint — rename '_dihedral_restraints_config' -> 'dihedral_restraints_config' to enable. Dihedral (DEGREES) of FOUR group centroids, axis = group2-group3. Types: harmonic{target_dihedral} (periodicity-safe, wrapped to +-180) | flat-bottomed{target_dihedral1,target_dihedral2} (cannot straddle +-180) | flat-bottomed1 | flat-bottomed2; move DEFAULT frees the ends (groups 1,4) and pins the axis (groups 2,3) — override with 'all' | an index | a list like [1,4]. weight/start_sigma/stop_sigma optional.",
         "atom_selection1": "chain A and (resid 5 to 50)",
         "atom_selection2": "chain A and (resid 51 to 100)",
         "atom_selection3": "chain A and (resid 101 to 150)",

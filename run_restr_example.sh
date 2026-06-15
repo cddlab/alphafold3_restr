@@ -31,5 +31,5 @@ if ! python run_alphafold.py \
     echo "af3 inference FAILED:"; tail -n 40 run_restr_example.log; exit 1
 fi
 grep -iE "rgi_utils|built spec|restraint|finalize|dropping" run_restr_example.log || true
-# (COM check: run check_dist.py with a gemmi-enabled venv; AF3's venv lacks gemmi.)
+# (centroid check: run check_dist.py with a gemmi-enabled venv; AF3's venv lacks gemmi.)
 echo done
