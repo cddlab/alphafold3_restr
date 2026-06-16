@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 
-from alphafold3.model.restraints.adapter import AF3RestraintAdapter
+from alphafold3.model.restraints.adapter import build_af3_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ def build_restraints(fold_input, example) -> 'AF3Restraints | None':
   # the rgi_utils default ("both" = intramolecular + ligand-protein), both of which
   # work under the jax backend; set mode explicitly to pick one.
 
-  adapter = AF3RestraintAdapter(fold_input, example)
+  adapter = build_af3_adapter(fold_input, example)
   rgi = CombinedRestraints()
   rgi.set_config(config)
   rgi.setup(adapter, nbatch=1)
