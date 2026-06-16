@@ -69,7 +69,8 @@ def build_restraints(fold_input, example) -> 'AF3Restraints | None':
 
   adapter = build_af3_adapter(fold_input, example)
   rgi = CombinedRestraints()
-  rgi.set_config(config)
-  rgi.setup(adapter, nbatch=1)
+  # Single-call lifecycle (config= folds in the old set_config); matches the other
+  # five tools. set_config()+setup() is the deprecated two-call shim.
+  rgi.setup(adapter, nbatch=1, config=config)
   minimizer = rgi.get_minimizer() if rgi.is_active() else None
   return AF3Restraints(rgi, minimizer)
