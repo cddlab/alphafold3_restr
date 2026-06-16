@@ -6,17 +6,18 @@
 """AF3 restraint glue around the shared rgi_utils engine.
 
 Spec construction (conformer bond/angle/chiral + intramolecular VdW + distance
-restraints) now lives entirely in rgi_utils: ``AF3RestraintAdapter`` exposes the
-AF3 batch through the rgi_utils adapter protocols and ``featurizer.build_spec``
-builds the ``RestraintSpec``. This module keeps only the AF3-specific glue:
+restraints) lives entirely in rgi_utils: the in-tool ``build_af3_adapter`` shim
+exposes the AF3 batch through the rgi_utils adapter protocols and
+``featurizer.build_spec`` builds the ``RestraintSpec``. This module keeps only the
+AF3-specific glue: read ``fold_input.restraints_config`` and inject ``backend='jax'``
+(AF3 runs the pure-JAX minimizer in the scan).
 
-  - inject ``backend='jax'`` (AF3 runs the pure-JAX minimizer in the scan),
-  - reshape positions ``(num_tokens, max_atoms_per_token, 3) <-> (-1, 3)`` around
-    the pure-JAX minimizer applied after each denoising step.
-
-The minimizer itself (jaxopt CG/LBFGS over an analytic energy, gated on the
-noise level) is ``rgi_utils.optim.jax_optim.make_minimizer`` — no pure_callback,
-no scipy — so the whole step stays JIT-compiled inside hk.scan/hk.vmap.
+The scan-time wrapper — flatten ``(num_tokens, max_atoms_per_token, 3) <-> (-1, 3)``
+around the pure minimizer + the duck-typed ``is_active``/``minimize_gpu``/``finalize``
+interface — now lives in ``rgi_utils.optim.scan_runner.ScanMinimizer`` (imported here
+as ``AF3Restraints`` for back-compat). The minimizer itself (CG/LBFGS over an analytic
+energy, gated on the noise level) is ``rgi_utils.optim.jax_optim.make_minimizer`` — no
+pure_callback, no scipy — so the whole step stays JIT-compiled inside hk.scan/hk.vmap.
 """
 
 from __future__ import annotations
@@ -24,55 +25,13 @@ from __future__ import annotations
 import logging
 
 from alphafold3.model.restraints.adapter import build_af3_adapter
+# The scan-time reshape wrapper + duck-typed (is_active/minimize_gpu/finalize)
+# interface is the framework-free rgi_utils ScanMinimizer; alias it to the historical
+# AF3Restraints name so model.py / diffusion_head.py + restraints/__init__.py are
+# unchanged.
+from rgi_utils.optim.scan_runner import ScanMinimizer as AF3Restraints
 
 logger = logging.getLogger(__name__)
-
-
-class AF3Restraints:
-  """Applies the rgi_utils pure-JAX minimizer after each denoising step.
-
-  Network code (model.py / diffusion_head.py) consumes this object purely by
-  duck typing: ``is_active()`` and ``minimize_gpu(positions, sigma)``.
-  """
-
-  def __init__(self, rgi, minimizer):
-    self._rgi = rgi  # rgi_utils CombinedRestraints (for is_active / stats)
-    self._minimizer = minimizer  # pure (flat_coords, sigma) -> flat_coords | None
-
-  def is_active(self) -> bool:
-    return self._rgi.is_active() and self._minimizer is not None
-
-  @property
-  def n_active(self) -> int:
-    """Number of optimised atoms (used by run_alphafold logging); 0 if none."""
-    spec = getattr(self._rgi, 'spec', None)
-    return int(spec.n_active) if spec is not None else 0
-
-  def minimize_gpu(self, positions, sigma_t):
-    """One restraint-minimization step on active atoms inside the diffusion scan.
-
-    positions: ``(num_tokens, max_atoms_per_token, 3)``. The rgi_utils minimizer
-    is pure JAX and gated on the noise level, so this stays JIT-compiled inside
-    hk.scan / hk.vmap. Reshaping to/from the flat ``(-1, 3)`` atom layout is the
-    only AF3-specific step.
-    """
-    if self._minimizer is None:
-      return positions
-    shape = positions.shape
-    flat = positions.reshape(-1, 3)
-    flat_opt = self._minimizer(flat, sigma_t)
-    return flat_opt.reshape(shape)
-
-  def finalize(self, positions, istep: int = 0) -> None:
-    """Log per-term restraint energy of a final structure (host-side, after the
-    scan; the in-scan minimizer cannot log). ``positions``: (num_tokens,
-    max_atoms_per_token, 3) or already-flat (-1, 3)."""
-    if self._minimizer is None:
-      return
-    import numpy as np
-
-    flat = np.asarray(positions).reshape(-1, 3)
-    self._rgi.finalize(flat, istep)
 
 
 def build_restraints(fold_input, example) -> 'AF3Restraints | None':
