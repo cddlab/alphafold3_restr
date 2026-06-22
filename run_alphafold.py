@@ -396,7 +396,7 @@ _FORCE_OUTPUT_DIR = flags.DEFINE_bool(
 )
 _MAX_TOKENS = flags.DEFINE_integer(
     "max_tokens",
-    5500,
+    None,
     "If set, skip any fold job whose approximate total number of model tokens"
     " exceeds this value, and proceed to the next fold input. Token count is"
     " estimated as one token per polymer residue (amino acid / nucleotide) and"
