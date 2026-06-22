@@ -334,7 +334,11 @@ def sample(
 
   mask = batch.predicted_structure_info.atom_mask
 
-  def apply_denoising_step(carry, noise_level):
+  def apply_denoising_step(carry, scan_x):
+    # scan_x carries the noise level AND a 0-based diffusion step index (for the restraint
+    # step-window gate). It was the bare noise_level before; now an (noise_level, istep)
+    # tuple, both broadcast across samples by the hk.vmap in_axes=(0, None) below.
+    noise_level, istep = scan_x
     key, positions, noise_level_prev = carry
     key, key_noise, key_aug = jax.random.split(key, 3)
 
@@ -353,7 +357,9 @@ def sample(
 
     # Apply restraint minimization on x_denoised before the Euler step.
     if restraints is not None:
-      positions_denoised = restraints.minimize_gpu(positions_denoised, noise_level_prev)
+      positions_denoised = restraints.minimize_gpu(
+          positions_denoised, noise_level_prev, istep
+      )
 
     grad = (positions_noisy - positions_denoised) / t_hat
 
@@ -379,7 +385,16 @@ def sample(
   apply_denoising_step = hk.vmap(
       apply_denoising_step, in_axes=(0, None), split_rng=(not hk.running_init())
   )
-  result, _ = hk.scan(apply_denoising_step, init, noise_levels[1:], unroll=4)
+  # Scan over (noise_level, step_index) pairs. jnp.arange(config.steps) has the same length
+  # as noise_levels[1:] (= config.steps), giving each scan iteration its 0-based diffusion
+  # step index for the restraint step-window gate. in_axes=(0, None) broadcasts the whole
+  # tuple across samples, exactly as the bare noise_level was broadcast before.
+  result, _ = hk.scan(
+      apply_denoising_step,
+      init,
+      (noise_levels[1:], jnp.arange(config.steps)),
+      unroll=4,
+  )
   _, positions_out, _ = result
 
   final_dense_atom_mask = jnp.tile(mask[None], (num_samples, 1, 1))
