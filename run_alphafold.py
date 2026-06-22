@@ -1158,7 +1158,6 @@ def main(_):
                 )
                 num_fold_inputs += 1
                 continue
-        #################
         process_fold_input(
             fold_input=fold_input,
             data_pipeline_config=data_pipeline_config,
