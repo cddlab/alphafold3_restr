@@ -793,9 +793,8 @@ def _count_ligand_atoms(
     """Approximate number of tokens for a ligand (one token per heavy atom)."""
     if ligand.smiles is not None:
         mol = rd_chem.MolFromSmiles(ligand.smiles)
-        # GetNumAtoms() counts heavy atoms only, matching AlphaFold 3 which does
-        # not tokenise hydrogens.
-        return mol.GetNumAtoms() if mol is not None else 0
+        # Use heavy atoms only, matching AlphaFold 3 which does not tokenise hydrogens.
+        return mol.GetNumHeavyAtoms() if mol is not None else 0
     num_atoms = 0
     for ccd_id in ligand.ccd_ids or ():
         component = ccd.get(ccd_id)
