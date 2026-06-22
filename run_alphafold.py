@@ -1133,10 +1133,7 @@ def main(_):
         if _NUM_SEEDS.value is not None:
             print(f"Expanding fold job {fold_input.name} to {_NUM_SEEDS.value} seeds")
             fold_input = fold_input.with_multiple_seeds(_NUM_SEEDS.value)
-        #################
-        fold_input_output_dir = os.path.join(
-            _OUTPUT_DIR.value, fold_input.sanitised_name()
-        )
+        fold_input_output_dir = os.path.join(_OUTPUT_DIR.value, fold_input.sanitised_name())
         if _SKIP_EXISTING.value and os.path.exists(
             os.path.join(fold_input_output_dir, "TERMS_OF_USE.md")
         ):
