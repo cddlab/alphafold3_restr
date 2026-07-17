@@ -19,6 +19,7 @@
 
 """Confidence categories for predictions."""
 
+from collections.abc import Sequence
 import dataclasses
 import enum
 import json
@@ -209,6 +210,8 @@ class StructureConfidenceSummary:
    chain_pair_iptm: [num_chains, num_chains] Chain pair ipTM.
    chain_ptm: [num_chains] Chain pTM.
    chain_iptm: [num_chains] Mean cross chain ipTM for a chain.
+   chain_ids: [num_chains] Chain IDs in the same order as the chain-level
+     arrays.
   """
 
   ptm: float
@@ -220,12 +223,14 @@ class StructureConfidenceSummary:
   chain_pair_iptm: np.ndarray
   chain_ptm: np.ndarray
   chain_iptm: np.ndarray
+  chain_ids: Sequence[str] = dataclasses.field(default_factory=list)
 
   @classmethod
   def from_inference_result(
       cls, inference_result: model.InferenceResult
   ) -> Self:
     """Returns a new instance based on a given inference result."""
+    chain_ids = [str(c) for c in inference_result.metadata['token_chain_ids']]
     return cls(
         ptm=float(inference_result.metadata['ptm']),
         iptm=float(inference_result.metadata['iptm']),
@@ -234,10 +239,11 @@ class StructureConfidenceSummary:
             inference_result.metadata['fraction_disordered']
         ),
         has_clash=float(inference_result.metadata['has_clash']),
-        chain_pair_pae_min=inference_result.metadata['chain_pair_pae_min'],
-        chain_pair_iptm=inference_result.metadata['chain_pair_iptm'],
-        chain_ptm=inference_result.metadata['iptm_ichain'],
-        chain_iptm=inference_result.metadata['iptm_xchain'],
+        chain_pair_pae_min=inference_result.metadata['chain_pair_pae_min'],  # pyrefly: ignore[bad-argument-type]
+        chain_pair_iptm=inference_result.metadata['chain_pair_iptm'],  # pyrefly: ignore[bad-argument-type]
+        chain_ptm=inference_result.metadata['iptm_ichain'],  # pyrefly: ignore[bad-argument-type]
+        chain_iptm=inference_result.metadata['iptm_xchain'],  # pyrefly: ignore[bad-argument-type]
+        chain_ids=chain_ids,
     )
 
   @classmethod
@@ -246,11 +252,16 @@ class StructureConfidenceSummary:
     return cls(**json.loads(json_string))
 
   def to_json(self) -> str:
+    """Returns a JSON representation of the dataclass."""
+
     def convert(data):
       if isinstance(data, np.ndarray):
         # Cast to np.float64 before rounding, since casting to Python float will
         # cast to a 64 bit float, potentially undoing np.float32 rounding.
         rounded_data = np.round(data.astype(np.float64), decimals=2).tolist()
+      elif isinstance(data, str):
+        # String leaves (e.g. chain_ids entries) are passed through unchanged.
+        rounded_data = data
       else:
         rounded_data = np.round(data, decimals=2)
       return rounded_data
@@ -290,10 +301,10 @@ class StructureConfidenceFull:
     atom_plddts = struc.atom_b_factor.tolist()
     token_chain_ids = [
         str(token_id)
-        for token_id in inference_result.metadata['token_chain_ids']
+        for token_id in inference_result.metadata['token_chain_ids']  # pyrefly: ignore[not-iterable]
     ]
     token_res_ids = [
-        int(token_id) for token_id in inference_result.metadata['token_res_ids']
+        int(token_id) for token_id in inference_result.metadata['token_res_ids']  # pyrefly: ignore[not-iterable]
     ]
     return cls(
         pae=pae,

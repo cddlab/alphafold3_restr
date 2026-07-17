@@ -200,6 +200,13 @@ class DataPipelineTest(parameterized.TestCase):
 
     self.assertEqual(diff, "", f"Result differs from golden:\n{diff}")
 
+  def test_all_examples_are_valid(self):
+    examples_dir = testing_data.Data(resources.ROOT / '../../examples').path()
+    for filename in sorted(os.listdir(examples_dir)):
+      with open(os.path.join(examples_dir, filename), 'rt') as f:
+        with self.subTest(filename):
+          folding_input.Input.from_json(f.read())
+
   def test_config(self):
     model_config = run_alphafold.make_model_config()
     model_config_as_str = json.dumps(
@@ -219,10 +226,11 @@ class DataPipelineTest(parameterized.TestCase):
         ccd=chemical_components.Ccd(),
         buckets=None,
     )
-    del featurised_example[0]['ref_pos']  # Depends on specific RDKit version.
 
     with _output('featurised_example.pkl') as (_, output):
       output.write(pickle.dumps(featurised_example))
+
+    del featurised_example[0]['ref_pos']  # Depends on specific RDKit version.
     featurised_example = jax.tree_util.tree_map(_hash_data, featurised_example)
     with _output('featurised_example.json') as (result_path, output):
       output.write(
