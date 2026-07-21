@@ -73,9 +73,16 @@ def build_af3_adapter(
     inference (no cropping); the rgi_utils adapter warns if it looks misaligned.
     """
     chain_id_to_asym = {c.id: i + 1 for i, c in enumerate(fold_input.chains)}
+    conformer_restraints_by_asym = {
+        chain_id_to_asym[chain.id]: bool(
+            getattr(chain, "conformer_restraints", False)
+        )
+        for chain in fold_input.chains
+    }
     return AF3RestraintAdapter(
         batch=example,
         chain_id_to_asym=chain_id_to_asym,
-        polymer_types=residue_names.POLYMER_TYPES,
+        polymer_residue_names=residue_names.POLYMER_TYPES,
         ligand_mols=_resolve_ligand_mols(fold_input),
+        conformer_restraints_by_asym=conformer_restraints_by_asym,
     )
