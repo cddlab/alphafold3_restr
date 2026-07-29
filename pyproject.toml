@@ -17,6 +17,7 @@ license = {file = "LICENSE"}
 dependencies = [
     "absl-py>=2.3.1",
     "dm-haiku==0.0.16",
+    "etils[epath]",
     "jax==0.9.1",
     "jax[cuda12]==0.9.1",
     "jaxopt>=0.8.5",
@@ -25,16 +26,19 @@ dependencies = [
     "tokamax==0.0.11",
     "tqdm",
     "zstandard",
-    "rgi-utils",
+    "rgi-utils @ git+https://github.com/cddlab/rgi_utils.git",
+]
+
+[project.optional-dependencies]
+gcsfs = [
+  # Use `uv sync --extra gcsfs` to enable GCS paths for inputs and outputs
+  "gcsfs",
 ]
 
 [dependency-groups]
 dev = [
     "pytest>=6.0",
 ]
-
-[tool.uv.sources]
-rgi-utils = { git = "ssh://git@github.com/cddlab/rgi_utils.git", rev = "main" }
 
 [tool.uv]
 package = true
