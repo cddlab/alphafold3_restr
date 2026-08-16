@@ -109,6 +109,9 @@ class Template:
       query_to_template_map: A mapping from query residue index to template
         residue index.
     """
+    if not mmcif:
+      raise ValueError('The template mmCIF must be a non-empty string.')
+
     self._mmcif = mmcif
     # Needed to make the Template class hashable.
     self._query_to_template = tuple(query_to_template_map.items())
@@ -132,6 +135,49 @@ class Template:
         other._query_to_template
     )
     return mmcifs_equal and maps_equal
+
+  @classmethod
+  def from_dict(
+      cls,
+      json_dict: Mapping[str, Any],
+      json_path: epath.PathLike | None = None,
+  ) -> Self:
+    """Constructs Template from the AlphaFold JSON dict.
+
+    Args:
+      json_dict: JSON dict representing the template, must have keys 'mmcif' or
+        'mmcifPath', 'queryIndices', and 'templateIndices'.
+      json_path: The path to the JSON file, used to resolve paths inside that
+        are relative to it.
+    """
+    _validate_keys(
+        json_dict.keys(),
+        {'mmcif', 'mmcifPath', 'queryIndices', 'templateIndices'},
+    )
+    mmcif = json_dict.get('mmcif', None)
+    mmcif_path = json_dict.get('mmcifPath', None)
+    if mmcif and mmcif_path:
+      raise ValueError('Only one of mmcif/mmcifPath can be set.')
+    if mmcif and len(mmcif) < 256 and epath.Path(mmcif).exists():
+      raise ValueError('Set the template path using the "mmcifPath" field.')
+    if mmcif_path:
+      mmcif = _read_file(path=mmcif_path, json_path=json_path)
+    query_to_template_map = dict(
+        zip(
+            json_dict['queryIndices'],
+            json_dict['templateIndices'] or [],  # AlphaFold < 3.0.4 used None.
+            strict=True,
+        )
+    )
+    return cls(mmcif=mmcif, query_to_template_map=query_to_template_map)
+
+  def to_dict(self) -> Mapping[str, Any]:
+    """Converts Template to an AlphaFold JSON dict."""
+    return {
+        'mmcif': self._mmcif,
+        'queryIndices': [m[0] for m in self._query_to_template],
+        'templateIndices': [m[1] for m in self._query_to_template],
+    }
 
 
 class ProteinChain:
@@ -384,24 +430,7 @@ class ProteinChain:
     else:
       templates = []
       for raw_template in raw_templates:
-        _validate_keys(
-            raw_template.keys(),
-            {'mmcif', 'mmcifPath', 'queryIndices', 'templateIndices'},
-        )
-        mmcif = raw_template.get('mmcif', None)
-        mmcif_path = raw_template.get('mmcifPath', None)
-        if mmcif and mmcif_path:
-          raise ValueError('Only one of mmcif/mmcifPath can be set.')
-        if mmcif and len(mmcif) < 256 and epath.Path(mmcif).exists():
-          raise ValueError('Set the template path using the "mmcifPath" field.')
-        if mmcif_path:
-          mmcif = _read_file(path=mmcif_path, json_path=json_path)
-        query_to_template_map = dict(
-            zip(raw_template['queryIndices'], raw_template['templateIndices'])
-        )
-        templates.append(
-            Template(mmcif=mmcif, query_to_template_map=query_to_template_map)
-        )
+        templates.append(Template.from_dict(raw_template, json_path=json_path))
 
     return cls(
         id=seq_id or json_dict['id'],
@@ -421,14 +450,7 @@ class ProteinChain:
     if self._templates is None:
       templates = None
     else:
-      templates = [
-          {
-              'mmcif': template.mmcif,
-              'queryIndices': list(template.query_to_template_map.keys()),
-              'templateIndices': list(template.query_to_template_map.values()),
-          }
-          for template in self._templates
-      ]
+      templates = [t.to_dict() for t in self._templates]
     contents = {
         'id': seq_id or self._id,
         'sequence': self._sequence,
@@ -455,10 +477,10 @@ class ProteinChain:
       ccd_coded_seq[ptm_index - 1] = ptm_code
     return ccd_coded_seq
 
-  def fill_missing_fields(self) -> Self:
+  def fill_missing_fields(self) -> 'ProteinChain':
     """Fill missing MSA and template fields with default values."""
-    return ProteinChain(  # pyrefly: ignore[bad-return]
-        id=self.id,
+    return ProteinChain(
+        id=self._id,
         sequence=self._sequence,
         ptms=self._ptms,
         description=self._description,
@@ -681,13 +703,13 @@ class RnaChain:
       ccd_coded_seq[modification_index - 1] = ccd_code
     return ccd_coded_seq
 
-  def fill_missing_fields(self) -> Self:
+  def fill_missing_fields(self) -> 'RnaChain':
     """Fill missing MSA fields with default values."""
-    return RnaChain(  # pyrefly: ignore[bad-return]
-        id=self.id,
-        sequence=self.sequence,
-        modifications=self.modifications,
-        description=self.description,
+    return RnaChain(
+        id=self._id,
+        sequence=self._sequence,
+        modifications=self._modifications,
+        description=self._description,
         unpaired_msa=self._unpaired_msa or '',
         conformer_restraints=self._conformer_restraints,
     )
@@ -754,6 +776,10 @@ class DnaChain:
     ])
 
   @property
+  def modifications(self) -> Sequence[tuple[str, int]]:
+    return self._modifications
+
+  @property
   def description(self) -> str | None:
     return self._description
 
@@ -785,9 +811,6 @@ class DnaChain:
             self._conformer_restraints,
         )
     )
-
-  def modifications(self) -> Sequence[tuple[str, int]]:
-    return self._modifications
 
   def hash_without_id(self) -> int:
     """Returns a hash ignoring the ID - useful for deduplication."""
