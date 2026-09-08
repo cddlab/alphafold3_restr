@@ -6,7 +6,7 @@
 """Restraint system for guided diffusion sampling in AlphaFold 3.
 
 Conformer restraints (bond/angle/chiral + intramolecular VdW for ligands) and
-distance restraints (centroid distance between atom groups) are built by rgi_utils
+distance restraints (centroid distance between atom groups) are built by rgi_toolkit
 from the AF3 batch via ``AF3RestraintAdapter`` and applied step-wise inside the
 diffusion scan by a pure-JAX minimizer.
 """

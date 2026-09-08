@@ -27,7 +27,7 @@ dependencies = [
     "tokamax==0.0.12",
     "tqdm",
     "zstandard",
-    "rgi-utils @ git+https://github.com/cddlab/rgi_utils.git",
+    "rgi-toolkit @ git+https://github.com/cddlab/rgi_toolkit.git",
 ]
 
 [project.optional-dependencies]

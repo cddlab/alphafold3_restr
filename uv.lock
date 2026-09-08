@@ -119,7 +119,7 @@ dependencies = [
     { name = "jaxopt", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "numpy", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "rdkit", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
-    { name = "rgi-utils", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
+    { name = "rgi-toolkit", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "tokamax", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "tqdm", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "zstandard", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
@@ -147,7 +147,7 @@ requires-dist = [
     { name = "jaxopt", specifier = ">=0.8.5" },
     { name = "numpy" },
     { name = "rdkit", specifier = "==2025.9.4" },
-    { name = "rgi-utils", git = "https://github.com/cddlab/rgi_utils.git" },
+    { name = "rgi-toolkit", git = "https://github.com/cddlab/rgi_toolkit.git" },
     { name = "tokamax", specifier = "==0.0.12" },
     { name = "tqdm" },
     { name = "zstandard" },
@@ -1583,9 +1583,9 @@ wheels = [
 ]
 
 [[package]]
-name = "rgi-utils"
+name = "rgi-toolkit"
 version = "0.1.0"
-source = { git = "https://github.com/cddlab/rgi_utils.git#7ee8123410fdc2abb09779b7c279a4b756ebd1c6" }
+source = { git = "https://github.com/cddlab/rgi_toolkit.git#9e766207f213d05e022e80000e9a3da2347749ce" }
 dependencies = [
     { name = "biopython", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },
     { name = "gemmi", marker = "(platform_machine == 'arm64' and sys_platform == 'darwin') or (platform_machine == 'aarch64' and sys_platform == 'linux') or (platform_machine == 'x86_64' and sys_platform == 'linux')" },

@@ -3,13 +3,13 @@
 # AlphaFold 3 source code is licensed under CC BY-NC-SA 4.0. To view a copy of
 # this license, visit https://creativecommons.org/licenses/by-nc-sa/4.0/
 
-"""In-tool shim: resolve AF3 ligand mols + build the rgi_utils AF3 adapter.
+"""In-tool shim: resolve AF3 ligand mols + build the rgi_toolkit AF3 adapter.
 
 All alphafold3 coupling lives HERE (folding_input access + CCD/SMILES -> RDKit mol).
 The framework-free adapter logic — flat-index / per-chain-resid mapping, the
 leaving-atom subset, atom-name decode, ``iter_atoms`` / ``iter_ligand_confs`` —
-moved to ``rgi_utils.alphafold3.adapter`` so AF3 follows the same pattern as the
-torch tools (a framework-free adapter in rgi_utils fed by tool-extracted plain data).
+moved to ``rgi_toolkit.alphafold3.adapter`` so AF3 follows the same pattern as the
+torch tools (a framework-free adapter in rgi_toolkit fed by tool-extracted plain data).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from alphafold3.common import folding_input
 from alphafold3.constants import chemical_components
 from alphafold3.constants import residue_names
 from alphafold3.data.tools import rdkit_utils
-from rgi_utils.alphafold3.adapter import AF3RestraintAdapter
+from rgi_toolkit.alphafold3.adapter import AF3RestraintAdapter
 
 
 def _resolve_ligand_mols(fold_input: folding_input.Input):
@@ -28,7 +28,7 @@ def _resolve_ligand_mols(fold_input: folding_input.Input):
     SMILES ligands -> ``Chem.MolFromSmiles``; single-CCD ligands -> the AF3 CCD
     machinery (``Ccd`` + ``mol_from_ccd_cif``). The Ccd is built lazily (only when a
     CCD ligand is actually present), matching the original property. Mols keep all CCD
-    atoms (incl. leaving atoms); the rgi_utils adapter maps atom names to flat indices
+    atoms (incl. leaving atoms); the rgi_toolkit adapter maps atom names to flat indices
     and drops CCD-only atoms.
     """
     try:
@@ -66,11 +66,11 @@ def _resolve_ligand_mols(fold_input: folding_input.Input):
 def build_af3_adapter(
     fold_input: folding_input.Input, example: dict
 ) -> AF3RestraintAdapter:
-    """Build the framework-free rgi_utils AF3 adapter from a fold_input + batch.
+    """Build the framework-free rgi_toolkit AF3 adapter from a fold_input + batch.
 
     The chain<->asym mapping assumes ``fold_input.chains`` order matches the batch
     asym_id assignment (both 1-based by appearance), which holds for standard
-    inference (no cropping); the rgi_utils adapter warns if it looks misaligned.
+    inference (no cropping); the rgi_toolkit adapter warns if it looks misaligned.
     """
     chain_id_to_asym = {c.id: i + 1 for i, c in enumerate(fold_input.chains)}
     conformer_restraints_by_asym = {
