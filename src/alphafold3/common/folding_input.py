@@ -1370,13 +1370,22 @@ class Input:
     elif user_ccd_path:
       user_ccd = _read_file(path=user_ccd_path, json_path=json_path)
 
+    restraints_config = raw_json.get('restraints_config')
+    if restraints_config is not None:
+      from rgi_toolkit.config import resolve_restraints_config
+
+      restraints_config = resolve_restraints_config(
+          restraints_config,
+          base_dir=epath.Path(json_path).parent if json_path is not None else None,
+      )
+
     return cls(
         name=raw_json['name'],
         chains=chains,
         rng_seeds=[int(seed) for seed in raw_json['modelSeeds']],
         bonded_atom_pairs=bonded_atom_pairs,
         user_ccd=user_ccd,
-        restraints_config=raw_json.get('restraints_config'),
+        restraints_config=restraints_config,
     )
 
   @classmethod
