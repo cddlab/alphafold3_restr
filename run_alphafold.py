@@ -489,32 +489,29 @@ class ModelRunner:
         jax.jit(forward_fn.apply, device=self._device), self.model_params
     )
 
-  def _build_model_with_restraints(self, restraints) -> Callable:
-    """Returns a JIT-compiled forward pass with restraints in closure.
-
-    The restraints object is captured by closure so its JAX arrays become
-    constants in the compiled XLA program. A new function is compiled per
-    unique restraints configuration.
-
-    Cached by restraints identity: restraints are seed-invariant (built once
-    before the seed loop in predict_structure), so without this every seed would
-    create a fresh jax.jit wrapper, miss the JIT cache, and recompile the entire
-    model — whereas the vanilla self._model (a cached_property) compiles once.
-    """
-    cached = getattr(self, '_restraint_model_cache', None)
-    if cached is not None and cached[0] is restraints:
-      return cached[1]
-    config = self._model_config
+  @functools.cached_property
+  def _model_with_restraints(self) -> Callable:
+    """Reuse one JIT function with restraint arrays passed as runtime arguments."""
 
     @hk.transform
-    def forward_fn(batch):
-      return model.Model(config)(batch, restraints=restraints)
+    def forward_fn(batch, restraints):
+      return model.Model(self._model_config)(batch, restraints=restraints)
 
-    model_fn = functools.partial(
+    return functools.partial(
         jax.jit(forward_fn.apply, device=self._device), self.model_params
     )
-    self._restraint_model_cache = (restraints, model_fn)
-    return model_fn
+
+  def _build_model_with_restraints(self, restraints) -> Callable:
+    """Bind this structure's numeric restraint state without closing over its values.
+
+    Targets, weights, windows and reference arrays are leaves of a JAX pytree.
+    Compatible structures therefore share the same in-memory JIT and persistent
+    compilation cache. Array shapes and static solver/program choices still
+    determine the compiled signature.
+    """
+    return functools.partial(
+        self._model_with_restraints, restraints=restraints.as_pytree()
+    )
 
   def run_inference(
       self,
